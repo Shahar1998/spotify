@@ -13,6 +13,8 @@ from spotify_service import (
     load_and_categorize_songs,
 )
 from PySide6.QtCore import QElapsedTimer, QObject, QThread, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QDesktopServices, QPixmap
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -25,7 +27,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PySide6.QtGui import QDesktopServices
 
 
 class LibraryLoader(QObject):
@@ -121,6 +122,10 @@ class GameWidget(QWidget):
         self.word_label = QLabel()
         self.clue_label = QLabel()
         self.clue_label.setWordWrap(True)
+        self.album_art_label = QLabel()
+        self.album_art_label.setFixedSize(240, 240)
+        self.album_art_label.setScaledContents(True)
+        self.album_art_label.setVisible(False)
         self.result_label = QLabel()
         self.next_button = QPushButton("Next Round")
         self.next_button.clicked.connect(self.next_round)
@@ -133,6 +138,7 @@ class GameWidget(QWidget):
             self.timer_label,
             self.word_label,
             self.clue_label,
+            self.album_art_label,
         ):
             layout.addWidget(widget)
 
@@ -150,6 +156,8 @@ class GameWidget(QWidget):
 
         layout.addWidget(self.result_label)
         layout.addWidget(self.next_button)
+        self.network_manager = QNetworkAccessManager(self)
+        self.active_art_reply = None
         self.show_round()
 
     def show_round(self):
@@ -161,6 +169,8 @@ class GameWidget(QWidget):
         self.score_label.setText(f"Score: {self.score}    Streak: {self.streak}")
         self.word_label.setText(f"Signature word: {round_info['target_word'].upper()}")
         self.clue_label.setText(round_info["clue"])
+        self.album_art_label.clear()
+        self.album_art_label.setVisible(False)
         self.result_label.clear()
         self.next_button.setVisible(False)
 
@@ -210,10 +220,34 @@ class GameWidget(QWidget):
                 QDesktopServices.openUrl(QUrl(url))
             )
             link_button.setVisible(bool(option.spotify_url))
+
+        correct_song = self.options[self.correct_option - 1]
+        self.load_album_art(correct_song.album_art_url)
         self.next_button.setText(
             "Finish Game" if self.round_number + 1 == len(self.rounds) else "Next Round"
         )
         self.next_button.setVisible(True)
+
+    def load_album_art(self, image_url):
+        if not image_url:
+            return
+        if self.active_art_reply:
+            self.active_art_reply.abort()
+        request = QNetworkRequest(QUrl(image_url))
+        self.active_art_reply = self.network_manager.get(request)
+        self.active_art_reply.finished.connect(self.album_art_loaded)
+
+    @Slot()
+    def album_art_loaded(self):
+        reply = self.active_art_reply
+        self.active_art_reply = None
+        if not reply or reply.error():
+            return
+        pixmap = QPixmap()
+        if pixmap.loadFromData(reply.readAll()):
+            self.album_art_label.setPixmap(pixmap)
+            self.album_art_label.setVisible(True)
+        reply.deleteLater()
 
     @Slot()
     def next_round(self):
