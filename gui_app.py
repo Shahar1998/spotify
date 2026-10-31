@@ -9,7 +9,12 @@ from core import (
     prepare_game_rounds,
 )
 from models import Song
-from spotify_service import LoadingCancelled, create_spotify_client, load_and_categorize_songs
+from spotify_service import (
+    LoadingCancelled,
+    create_spotify_client,
+    list_spotify_sources,
+    load_and_categorize_songs,
+)
 from PySide6.QtCore import QElapsedTimer, QObject, QThread, QTimer, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
@@ -36,9 +41,10 @@ class LibraryLoader(QObject):
     failed = Signal(str)
     cancelled = Signal()
 
-    def __init__(self, max_songs):
+    def __init__(self, max_songs, source):
         super().__init__()
         self.max_songs = max_songs
+        self.source = source
         self.cancel_requested = Event()
 
     @Slot()
@@ -54,12 +60,70 @@ class LibraryLoader(QObject):
                 max_songs=self.max_songs,
                 progress_callback=self.progress.emit,
                 cancel_callback=self.cancel_requested.is_set,
+                source=self.source,
             )
             self.finished.emit(*result)
         except LoadingCancelled:
             self.cancelled.emit()
         except Exception as error:
             self.failed.emit(str(error))
+
+
+class SourceLoader(QObject):
+    finished = Signal(object)
+    failed = Signal(str)
+
+    @Slot()
+    def run(self):
+        try:
+            self.finished.emit(list_spotify_sources(create_spotify_client()))
+        except Exception as error:
+            self.failed.emit(str(error))
+
+
+class SourceSetupWidget(QWidget):
+    load_source = Signal(int, object)
+
+    def __init__(self, sources):
+        super().__init__()
+        title = QLabel("Choose your music source")
+        title.setObjectName("pageTitle")
+        subtitle = QLabel("Sample tracks from Liked Songs or one of your playlists.")
+        subtitle.setObjectName("mutedText")
+        self.source_combo = QComboBox()
+        for source in sources:
+            self.source_combo.addItem(source['name'], source)
+        self.song_count = QSpinBox()
+        self.song_count.setRange(20, 200)
+        self.song_count.setSingleStep(10)
+        self.song_count.setValue(100)
+        self.song_count.setSuffix(" songs")
+        load_button = QPushButton("Load Selected Source")
+        load_button.setObjectName("primaryButton")
+        load_button.clicked.connect(self.start_loading)
+
+        panel = QFrame()
+        panel.setObjectName("panel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.addWidget(title)
+        panel_layout.addWidget(subtitle)
+        panel_layout.addSpacing(16)
+        panel_layout.addWidget(QLabel("Library or playlist"))
+        panel_layout.addWidget(self.source_combo)
+        panel_layout.addWidget(QLabel("Number of songs to sample"))
+        panel_layout.addWidget(self.song_count)
+        panel_layout.addSpacing(12)
+        panel_layout.addWidget(load_button)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(48, 40, 48, 40)
+        layout.addStretch()
+        layout.addWidget(panel)
+        layout.addStretch()
+
+    @Slot()
+    def start_loading(self):
+        self.load_source.emit(self.song_count.value(), self.source_combo.currentData())
 
 
 class SetupWidget(QWidget):
@@ -351,11 +415,16 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.thread = None
         self.loader = None
+        self.source_thread = None
+        self.source_loader = None
         self.english_songs = None
         self.hebrew_songs = None
         self.setWindowTitle(f"SpotiWord v{__version__}")
         self.setMinimumSize(760, 700)
 
+        self.show_loading_screen()
+
+    def show_loading_screen(self):
         self.status_label = QLabel("Ready to load your Spotify library.")
         self.status_label.setObjectName("mutedText")
         self.progress_bar = QProgressBar()
@@ -365,7 +434,7 @@ class MainWindow(QMainWindow):
         self.song_count.setSingleStep(10)
         self.song_count.setValue(100)
         self.song_count.setSuffix(" songs")
-        self.start_button = QPushButton("Load Random Songs")
+        self.start_button = QPushButton("Choose Library Source")
         self.start_button.setObjectName("primaryButton")
         self.start_button.clicked.connect(self.start_loading)
         self.cancel_button = QPushButton("Cancel Loading")
@@ -374,40 +443,36 @@ class MainWindow(QMainWindow):
 
         layout = QVBoxLayout()
         layout.setContentsMargins(48, 48, 48, 48)
-        brand = QLabel(f"SPOTIWORD  <span class='version'>v{__version__}</span>")
+        brand = QLabel(f"SPOTIWORD  v{__version__}")
         brand.setObjectName("brand")
         layout.addWidget(brand)
         layout.addSpacing(20)
-        layout.addWidget(QLabel("Number of songs to sample:"))
-        layout.addWidget(self.song_count)
+        layout.addWidget(QLabel("Connect to Spotify to choose a library or playlist:"))
         layout.addWidget(self.status_label)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.start_button)
         layout.addWidget(self.cancel_button)
         container = QWidget()
         container.setLayout(layout)
+        self.loading_container = container
         self.setCentralWidget(container)
 
     @Slot()
     def start_loading(self):
         self.start_button.setEnabled(False)
-        self.cancel_button.setEnabled(True)
         self.status_label.setText("Connecting to Spotify...")
         self.progress_bar.setRange(0, 0)
-        self.thread = QThread(self)
-        self.loader = LibraryLoader(self.song_count.value())
-        self.loader.moveToThread(self.thread)
-        self.thread.started.connect(self.loader.run)
-        self.loader.progress.connect(self.update_progress)
-        self.loader.finished.connect(self.loading_finished)
-        self.loader.failed.connect(self.loading_failed)
-        self.loader.cancelled.connect(self.loading_cancelled)
-        self.loader.finished.connect(self.thread.quit)
-        self.loader.failed.connect(self.thread.quit)
-        self.loader.cancelled.connect(self.thread.quit)
-        self.thread.finished.connect(self.thread.deleteLater)
-        self.thread.finished.connect(self.loader.deleteLater)
-        self.thread.start()
+        self.source_thread = QThread(self)
+        self.source_loader = SourceLoader()
+        self.source_loader.moveToThread(self.source_thread)
+        self.source_thread.started.connect(self.source_loader.run)
+        self.source_loader.finished.connect(self.sources_loaded)
+        self.source_loader.failed.connect(self.loading_failed)
+        self.source_loader.finished.connect(self.source_thread.quit)
+        self.source_loader.failed.connect(self.source_thread.quit)
+        self.source_thread.finished.connect(self.source_thread.deleteLater)
+        self.source_thread.finished.connect(self.source_loader.deleteLater)
+        self.source_thread.start()
 
     @Slot(int, int, str)
     def update_progress(self, current, total, message):
@@ -420,6 +485,13 @@ class MainWindow(QMainWindow):
         self.english_songs = english_songs
         self.hebrew_songs = hebrew_songs
         self.show_setup()
+
+    @Slot(object)
+    def sources_loaded(self, sources):
+        self.start_button.setEnabled(True)
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(0)
+        self.show_source_setup(sources)
 
     @Slot(str)
     def loading_failed(self, message):
@@ -437,6 +509,28 @@ class MainWindow(QMainWindow):
             self.status_label.setText("Cancelling loading...")
             self.loader.cancel()
 
+    @Slot(int, object)
+    def load_selected_source(self, max_songs, source):
+        self.show_loading_screen()
+        self.start_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.status_label.setText(f"Loading {source['name']}...")
+        self.progress_bar.setRange(0, 0)
+        self.thread = QThread(self)
+        self.loader = LibraryLoader(max_songs, source)
+        self.loader.moveToThread(self.thread)
+        self.thread.started.connect(self.loader.run)
+        self.loader.progress.connect(self.update_progress)
+        self.loader.finished.connect(self.loading_finished)
+        self.loader.failed.connect(self.loading_failed)
+        self.loader.cancelled.connect(self.loading_cancelled)
+        self.loader.finished.connect(self.thread.quit)
+        self.loader.failed.connect(self.thread.quit)
+        self.loader.cancelled.connect(self.thread.quit)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread.finished.connect(self.loader.deleteLater)
+        self.thread.start()
+
     @Slot()
     def loading_cancelled(self):
         self.progress_bar.setRange(0, 1)
@@ -448,6 +542,11 @@ class MainWindow(QMainWindow):
     def show_setup(self):
         setup = SetupWidget(self.english_songs, self.hebrew_songs)
         setup.start_game.connect(self.start_game)
+        self.setCentralWidget(setup)
+
+    def show_source_setup(self, sources):
+        setup = SourceSetupWidget(sources)
+        setup.load_source.connect(self.load_selected_source)
         self.setCentralWidget(setup)
 
     @Slot(object, str, str)

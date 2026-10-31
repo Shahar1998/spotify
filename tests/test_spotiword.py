@@ -4,6 +4,7 @@ import pytest
 from models import Song
 from core import HEBREW_STOP_WORDS, strip_hebrew_niqqud
 from lyrics_client import LyricsCache, fetch_lrclib_lyrics
+from spotify_service import list_spotify_sources
 
 from SpotiWord import (
     clean_track_name,
@@ -192,3 +193,17 @@ def test_song_model_preserves_game_metadata():
 
     assert record["Track Name"] == "Example"
     assert record["Album Art URL"].endswith("art.jpg")
+
+
+def test_spotify_sources_include_liked_songs_and_playlists():
+    class FakeSpotifyClient:
+        def current_user_playlists(self, limit):
+            return {
+                "items": [{"id": "playlist-1", "name": "Road Trip"}],
+                "next": None,
+            }
+
+    sources = list_spotify_sources(FakeSpotifyClient())
+
+    assert sources[0] == {"id": None, "name": "Liked Songs", "kind": "liked"}
+    assert sources[1]["name"] == "Road Trip"
