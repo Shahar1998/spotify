@@ -12,9 +12,9 @@ import pandas as pd
 dotenv.load_dotenv()
 
 # 1. Spotify Setup & Authentication
-os.environ['SPOTIPY_CLIENT_ID'] = os.getenv('CLIENT_ID')
-os.environ['SPOTIPY_CLIENT_SECRET'] = os.getenv('CLIENT_SECRET')
-os.environ['SPOTIPY_REDIRECT_URI'] = os.getenv('REDIRECT_URI')
+os.environ['SPOTIPY_CLIENT_ID'] = os.getenv('SPOTIFY_CLIENT_ID')
+os.environ['SPOTIPY_CLIENT_SECRET'] = os.getenv('SPOTIFY_CLIENT_SECRET')
+os.environ['SPOTIPY_REDIRECT_URI'] = os.getenv('SPOTIFY_REDIRECT_URI')
 
 sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope='user-library-read'))
 
