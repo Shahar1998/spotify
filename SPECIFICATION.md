@@ -30,9 +30,12 @@ Secrets and OAuth tokens must remain local and must never be committed to Git.
 ## 3. Application architecture
 
 ```text
-SpotiWord.py       Application orchestration, game flow, scoring, and word analysis
+SpotiWord.py       Backward-compatible public entry point
+core.py            Pure game rules, tokenization, and scoring
 models.py          Typed `Song` data model shared by services and interfaces
+spotify_service.py Spotify authentication and library loading
 lyrics_client.py   LRCLIB requests, retries, response handling, and lyric caching
+cli.py             Terminal interface
 gui_app.py         PySide6 desktop interface and background library loading
 tests/             Automated tests for pure and isolated behavior
 ```

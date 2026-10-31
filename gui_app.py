@@ -1,14 +1,16 @@
 import sys
 from threading import Event
 
-from SpotiWord import (
+from core import (
     __version__,
     build_round_options,
     calculate_round_score,
+    prepare_game_rounds,
+)
+from spotify_service import (
     create_spotify_client,
     LoadingCancelled,
     load_and_categorize_songs,
-    prepare_game_rounds,
 )
 from PySide6.QtCore import QElapsedTimer, QObject, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtWidgets import (

@@ -41,6 +41,12 @@ Never commit `.env`, Spotify tokens, `.cache`, or personal library exports.
 python SpotiWord.py
 ```
 
+The terminal implementation can also be started explicitly with:
+
+```powershell
+python cli.py
+```
+
 To launch the GUI loading window:
 
 ```powershell
@@ -64,10 +70,13 @@ The tests cover title cleanup, Hebrew detection, clue generation, word boundarie
 ## Project layout
 
 ```text
-SpotiWord.py          Main application and game flow
+SpotiWord.py          Backward-compatible public entry point
+core.py               Pure game rules, tokenization, and scoring
 models.py             Typed Song data model
+spotify_service.py    Spotify authentication and library loading
 lyrics_client.py      LRCLIB access, retries, and local lyric cache
-gui_app.py            PySide6 GUI loading window
+cli.py                Terminal interface
+gui_app.py            PySide6 desktop interface
 tests/                Automated tests
 SPECIFICATION.md      Product behavior and technical requirements
 requirements.txt      Python dependencies
