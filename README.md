@@ -2,7 +2,7 @@
 
 SpotiWord is a terminal-based lyric trivia game for songs saved in a user's Spotify library. It retrieves lyrics from LRCLIB, identifies signature words, creates multiple-choice rounds, and provides Spotify links for the songs.
 
-Current version: **0.2.0**
+Current version: **0.2.1**
 
 ## Requirements
 
@@ -33,7 +33,7 @@ SPOTIFY_CLIENT_SECRET=your_client_secret
 SPOTIFY_REDIRECT_URI=http://127.0.0.1:8888/callback
 ```
 
-Never commit `.env`, Spotify tokens, `.cache`, or personal library exports.
+Never commit `.env`, Spotify tokens, `.cache`, or personal library exports. The packaged application reads `.env` beside the executable, while OAuth and lyric caches are stored in the user's application-data directory.
 
 ## Run
 
@@ -103,4 +103,4 @@ The project follows Semantic Versioning:
 MAJOR.MINOR.PATCH
 ```
 
-The current release is `0.2.0`. Git release tags use the `v` prefix, for example `v0.2.0`.
+The current release is `0.2.1`. Git release tags use the `v` prefix, for example `v0.2.1`.

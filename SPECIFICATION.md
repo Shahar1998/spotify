@@ -4,7 +4,7 @@
 
 SpotiWord is an interactive terminal trivia game based on a user's Spotify Liked Songs library. The game retrieves lyrics, identifies a signature word for a song, provides a lyric clue with the word hidden, and asks the player to select the matching song from four options.
 
-Current release: `0.2.0`.
+Current release: `0.2.1`.
 
 ## 2. Technology and external services
 
@@ -113,7 +113,7 @@ An incorrect answer gives zero points and resets the streak. Timing uses a monot
 - Pure logic should be testable without Spotify or LRCLIB network access.
 - New behavior should include automated tests.
 - Private files must remain excluded by `.gitignore`.
-- Release versions use Semantic Versioning and Git tags such as `v0.2.0`.
+- Release versions use Semantic Versioning and Git tags such as `v0.2.1`.
 
 ## 11. GUI requirements
 
@@ -127,3 +127,10 @@ The GUI must keep Spotify and LRCLIB work off the main UI thread. While loading,
 - Add structured logging and a richer command-line interface.
 - Improve language detection beyond track and artist metadata.
 - Add a signed Windows installer and application icon.
+
+## 13. v0.3 backlog
+
+- Playlist selector for saved songs and custom Spotify playlists.
+- Optional short audio previews when Spotify supplies a preview URL.
+- Local high-score history with SQLite or JSON persistence.
+- First-run configuration assistance and packaged-app diagnostics.

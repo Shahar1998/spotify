@@ -4,9 +4,10 @@ from pathlib import Path
 from threading import Lock, local
 
 import requests
+from config import LYRICS_CACHE_PATH
 
 
-DEFAULT_CACHE_PATH = Path('.lyrics_cache.json')
+DEFAULT_CACHE_PATH = LYRICS_CACHE_PATH
 RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 NEGATIVE_CACHE_TTL_SECONDS = 24 * 60 * 60
 _CACHE_LOCK = Lock()
@@ -103,7 +104,7 @@ def fetch_lrclib_lyrics(
         'artist_name': artist_name,
     }
     request_headers = {
-        'User-Agent': 'SpotiWord/0.2.0',
+        'User-Agent': 'SpotiWord/0.2.1',
     }
 
     try:

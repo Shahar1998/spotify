@@ -8,12 +8,13 @@ import dotenv
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
+from config import ENV_PATH, SPOTIFY_CACHE_PATH
 from core import is_hebrew
 from lyrics_client import LyricsCache, fetch_lrclib_lyrics
 from models import Song
 
 
-dotenv.load_dotenv()
+dotenv.load_dotenv(ENV_PATH)
 
 
 class LoadingCancelled(Exception):
@@ -38,6 +39,7 @@ def create_spotify_client():
         client_secret=client_secret,
         redirect_uri=redirect_uri,
         scope='user-library-read',
+        cache_path=str(SPOTIFY_CACHE_PATH),
     ))
 
 
