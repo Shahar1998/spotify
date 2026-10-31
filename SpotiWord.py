@@ -2,13 +2,14 @@ import os
 import random
 import re
 import time
+import math
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 import dotenv
 import pandas as pd
-from lyrics_client import fetch_lrclib_lyrics
+from lyrics_client import LyricsCache, fetch_lrclib_lyrics
 
 __version__ = "0.1.0"
 
@@ -53,15 +54,45 @@ def create_spotify_client():
 
 def clean_track_name(name):
     """Removes extra tags like '(feat. ...)', 'Remix', etc. to help match lyrics accurately."""
-    name = re.sub(r'\(feat.*?\)', '', name, flags=re.IGNORECASE)
-    name = re.sub(r'\(ft.*?\)', '', name, flags=re.IGNORECASE)
-    name = re.sub(r'\(remix.*?\)', '', name, flags=re.IGNORECASE)
-    return name.strip()
+    name = re.sub(
+        r'[\(\[]\s*(?:feat\.?|ft\.?|with)\b.*?[\)\]]',
+        '', name, flags=re.IGNORECASE
+    )
+    name = re.sub(
+        r'[\(\[]\s*remix\b.*?[\)\]]',
+        '', name, flags=re.IGNORECASE
+    )
+    name = re.sub(
+        r'\s*[-–]\s*(?:\d{4}\s+)?(?:remaster(?:ed)?|live|radio edit|acoustic)\b.*$',
+        '', name, flags=re.IGNORECASE
+    )
+    return re.sub(r'\s{2,}', ' ', name).strip(' -–')
+
+
+def strip_hebrew_niqqud(text):
+    """Remove Hebrew cantillation marks and vowel points."""
+    return re.sub(r'[\u0591-\u05C7]', '', text)
+
+
+HEBREW_STOP_WORDS = {
+    'של', 'את', 'זה', 'על', 'עם', 'לא', 'כי', 'אם', 'אני', 'אתה', 'הוא',
+    'היא', 'אנחנו', 'הם', 'הן', 'מה', 'מי', 'כל', 'רק', 'עוד', 'שלי',
+    'שלך', 'לו', 'לה', 'אותי', 'אותך', 'אותו', 'אותה', 'אותנו', 'היה',
+    'היו', 'תהיה', 'יהיה', 'כבר', 'שם', 'פה', 'כמו', 'אבל', 'טוב'
+}
+
+
+def get_stop_words(text):
+    stop_words = set(STOP_WORDS)
+    if is_hebrew(text):
+        stop_words.update(HEBREW_STOP_WORDS)
+    return stop_words
 
 
 def tokenize_words(text):
     """Return lowercase alphabetic words, including contractions."""
-    return re.findall(r"[^\W\d_]+(?:['’][^\W\d_]+)*", text.lower(), re.UNICODE)
+    normalized_text = strip_hebrew_niqqud(text).lower()
+    return re.findall(r"[^\W\d_]+(?:['’][^\W\d_]+)*", normalized_text, re.UNICODE)
 
 
 def calculate_round_score(is_correct, elapsed_time, streak):
@@ -90,9 +121,10 @@ def prepare_game_rounds(df, difficulty_level, max_rounds=5):
     for idx, row in df.iterrows():
         if not row['Has Real Lyrics']:
             continue
+        stop_words = get_stop_words(row['Lyrics'])
         words = tokenize_words(row['Lyrics'])
         for word in set(words):
-            if len(word) > 3 and word not in STOP_WORDS and any(c.isalpha() for c in word):
+            if len(word) > 3 and word not in stop_words and any(c.isalpha() for c in word):
                 word_to_tracks.setdefault(word, []).append(idx)
 
     valid_rounds = []
@@ -100,7 +132,7 @@ def prepare_game_rounds(df, difficulty_level, max_rounds=5):
     for idx, row in real_lyrics_df.iterrows():
         title_words = set(tokenize_words(row['Track Name']))
         artist_words = set(tokenize_words(row['Artist']))
-        excluded_words = STOP_WORDS.union(title_words).union(artist_words)
+        excluded_words = get_stop_words(row['Lyrics']).union(title_words).union(artist_words)
         filtered_words = [
             word for word in tokenize_words(row['Lyrics'])
             if len(word) > 3
@@ -161,7 +193,7 @@ def get_lyric_snippet_clue(lyrics_text, target_word):
             
     return f"Line Clue: Contains the word '____'"
 
-def _build_song_entry(item):
+def _build_song_entry(item, lyrics_cache=None):
     """Convert one Spotify saved-track item into a game song entry."""
     track = item.get('track')
     if not track or not track.get('artists'):
@@ -174,7 +206,11 @@ def _build_song_entry(item):
     track_name_cleaned = clean_track_name(original_name)
     is_heb = is_hebrew(original_name) or is_hebrew(artist_name)
 
-    lyrics_text = fetch_lrclib_lyrics(track_name_cleaned, artist_name)
+    lyrics_text = fetch_lrclib_lyrics(
+        track_name_cleaned,
+        artist_name,
+        cache=lyrics_cache,
+    )
     has_real_lyrics = bool(lyrics_text)
 
     if not has_real_lyrics:
@@ -195,22 +231,31 @@ def load_and_categorize_songs(
     progress_callback=None,
     cancel_callback=None,
 ):
-    """Load a random sample of saved songs and retrieve their lyrics."""
-    print("Loading your saved-song list from Spotify...")
+    """Load random Spotify pages and retrieve lyrics for the sample."""
+    print("Loading random pages from your Spotify library...")
     page_size = 50
-    first_page = spotify_client.current_user_saved_tracks(limit=page_size, offset=0)
-    total_tracks = first_page.get('total', len(first_page.get('items', [])))
-    all_items = list(first_page.get('items', []))
+    metadata = spotify_client.current_user_saved_tracks(limit=1, offset=0)
+    total_tracks = metadata.get('total', len(metadata.get('items', [])))
+    total_pages = max(1, math.ceil(total_tracks / page_size))
+    pages_needed = min(total_pages, max(1, math.ceil(max_songs / page_size) + 1))
+    selected_pages = random.sample(range(total_pages), pages_needed)
+    all_items = []
 
-    for offset in range(page_size, total_tracks, page_size):
+    for page_number in selected_pages:
         if cancel_callback and cancel_callback():
             raise LoadingCancelled()
         page = spotify_client.current_user_saved_tracks(
             limit=page_size,
-            offset=offset,
+            offset=page_number * page_size,
         )
         all_items.extend(page.get('items', []))
 
+    unique_items = {}
+    for item in all_items:
+        track = item.get('track') or {}
+        track_id = track.get('id') or f"{track.get('name')}::{track.get('uri')}"
+        unique_items[track_id] = item
+    all_items = list(unique_items.values())
     sample_size = min(max_songs, len(all_items))
     selected_items = random.sample(all_items, sample_size)
     print(f"Selected {sample_size} random tracks from {len(all_items)} saved songs.")
@@ -221,8 +266,12 @@ def load_and_categorize_songs(
     english_songs = []
     hebrew_songs = []
 
+    lyrics_cache = LyricsCache()
     with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = [executor.submit(_build_song_entry, item) for item in selected_items]
+        futures = [
+            executor.submit(_build_song_entry, item, lyrics_cache)
+            for item in selected_items
+        ]
         for number, future in enumerate(as_completed(futures), 1):
             if cancel_callback and cancel_callback():
                 for pending_future in futures:
@@ -240,6 +289,7 @@ def load_and_categorize_songs(
             else:
                 english_songs.append(song_entry)
 
+    lyrics_cache.flush()
     print()
     print(f"\n[Language Split Summary] English tracks: {len(english_songs)} | Hebrew tracks: {len(hebrew_songs)}\n")
     return pd.DataFrame(english_songs), pd.DataFrame(hebrew_songs)

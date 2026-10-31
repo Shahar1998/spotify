@@ -46,7 +46,7 @@ Spotify authentication is created by `create_spotify_client()` when the applicat
 4. Remove common feature and remix tags before querying LRCLIB.
 5. Classify a track as Hebrew when its track name or primary artist contains Hebrew Unicode characters. All other tracks are placed in the English pool.
 
-The current implementation reads one Spotify saved-track page. Pagination is a planned improvement for larger libraries.
+The loader first reads the total library size, samples random Spotify pages, deduplicates tracks, and then randomly selects up to the requested sample size. This avoids fetching every saved track solely to create a sample.
 
 ## 5. Lyric retrieval
 
@@ -117,7 +117,7 @@ The GUI must keep Spotify and LRCLIB work off the main UI thread. While loading,
 
 ## 12. Planned improvements
 
-- Fetch all saved tracks through Spotify pagination.
+- Improve random-page sampling when the selected pages contain too few unique tracks.
 - Improve metadata cleaning for more release-tag formats.
 - Separate Spotify access, analysis, and terminal presentation into additional modules.
 - Add structured logging and a richer command-line interface.

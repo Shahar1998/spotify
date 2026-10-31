@@ -1,7 +1,7 @@
 import json
 import time
 from pathlib import Path
-from threading import Lock
+from threading import Lock, local
 
 import requests
 
@@ -10,6 +10,8 @@ DEFAULT_CACHE_PATH = Path('.lyrics_cache.json')
 RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 NEGATIVE_CACHE_TTL_SECONDS = 24 * 60 * 60
 _CACHE_LOCK = Lock()
+_THREAD_LOCAL = local()
+_MISSING = object()
 
 
 def _cache_key(track_name, artist_name):
@@ -41,28 +43,60 @@ def _save_cache(cache_path, cache):
         pass
 
 
+class LyricsCache:
+    """In-memory lyric cache that can be flushed once after a batch."""
+
+    def __init__(self, cache_path=DEFAULT_CACHE_PATH):
+        self.cache_path = Path(cache_path)
+        self.data = _load_cache(self.cache_path)
+        self.lock = Lock()
+
+    def get(self, key):
+        with self.lock:
+            if key not in self.data:
+                return _MISSING
+            value = self.data[key]
+            if isinstance(value, dict):
+                lyrics = value.get('lyrics')
+                cached_at = value.get('cached_at', 0)
+                if lyrics or time.time() - cached_at < NEGATIVE_CACHE_TTL_SECONDS:
+                    return lyrics
+                del self.data[key]
+                return _MISSING
+            return value
+
+    def set(self, key, lyrics):
+        with self.lock:
+            self.data[key] = {'lyrics': lyrics, 'cached_at': time.time()}
+
+    def flush(self):
+        with self.lock:
+            _save_cache(self.cache_path, self.data)
+
+
+def _get_thread_session():
+    if not hasattr(_THREAD_LOCAL, 'session'):
+        _THREAD_LOCAL.session = requests.Session()
+    return _THREAD_LOCAL.session
+
+
 def fetch_lrclib_lyrics(
     track_name,
     artist_name,
     session=None,
     cache_path=DEFAULT_CACHE_PATH,
+    cache=None,
     max_attempts=3,
 ):
     """Fetch and cache plain lyrics from LRCLIB with retry handling."""
-    cache = _load_cache(cache_path)
     key = _cache_key(track_name, artist_name)
-    if key in cache:
-        cached_value = cache[key]
-        if isinstance(cached_value, dict):
-            cached_lyrics = cached_value.get('lyrics')
-            cached_at = cached_value.get('cached_at', 0)
-            if cached_lyrics or time.time() - cached_at < NEGATIVE_CACHE_TTL_SECONDS:
-                return cached_lyrics
-        else:
-            return cached_value
+    owns_cache = cache is None
+    lyric_cache = cache or LyricsCache(cache_path)
+    cached_lyrics = lyric_cache.get(key)
+    if cached_lyrics is not _MISSING:
+        return cached_lyrics
 
-    owns_session = session is None
-    http = session or requests.Session()
+    http = session or _get_thread_session()
     request_url = 'https://lrclib.net/api/get'
     request_params = {
         'track_name': track_name,
@@ -86,13 +120,15 @@ def fetch_lrclib_lyrics(
                     data = response.json()
                     lyrics = data.get('plainLyrics')
                     result = lyrics.strip() if isinstance(lyrics, str) else None
-                    cache[key] = {'lyrics': result, 'cached_at': time.time()}
-                    _save_cache(cache_path, cache)
+                    lyric_cache.set(key, result)
+                    if owns_cache:
+                        lyric_cache.flush()
                     return result
 
                 if response.status_code == 404:
-                    cache[key] = {'lyrics': None, 'cached_at': time.time()}
-                    _save_cache(cache_path, cache)
+                    lyric_cache.set(key, None)
+                    if owns_cache:
+                        lyric_cache.flush()
                     return None
 
                 if response.status_code not in RETRY_STATUS_CODES:
@@ -103,9 +139,9 @@ def fetch_lrclib_lyrics(
             if attempt < max_attempts - 1:
                 time.sleep(2 ** attempt)
     finally:
-        if owns_session:
-            http.close()
+        pass
 
-    cache[key] = {'lyrics': None, 'cached_at': time.time()}
-    _save_cache(cache_path, cache)
+    lyric_cache.set(key, None)
+    if owns_cache:
+        lyric_cache.flush()
     return None
