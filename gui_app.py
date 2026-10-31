@@ -1,4 +1,5 @@
 import sys
+import logging
 from threading import Event
 
 from core import (
@@ -8,6 +9,7 @@ from core import (
     is_hebrew,
     prepare_game_rounds,
 )
+from config import configure_logging, missing_configuration, save_configuration
 from models import Song
 from scores import save_score, top_scores
 from spotify_service import (
@@ -22,10 +24,14 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QProgressBar,
@@ -67,6 +73,7 @@ class LibraryLoader(QObject):
         except LoadingCancelled:
             self.cancelled.emit()
         except Exception as error:
+            logging.exception("Spotify library loading failed")
             self.failed.emit(str(error))
 
 
@@ -79,7 +86,54 @@ class SourceLoader(QObject):
         try:
             self.finished.emit(list_spotify_sources(create_spotify_client()))
         except Exception as error:
+            logging.exception("Spotify source loading failed")
             self.failed.emit(str(error))
+
+
+class ConfigurationDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Spotify Configuration")
+        self.setMinimumWidth(520)
+
+        self.client_id = QLineEdit()
+        self.client_secret = QLineEdit()
+        self.client_secret.setEchoMode(QLineEdit.Password)
+        self.redirect_uri = QLineEdit("http://127.0.0.1:8888/callback")
+
+        form = QFormLayout()
+        form.addRow("Client ID", self.client_id)
+        form.addRow("Client Secret", self.client_secret)
+        form.addRow("Redirect URI", self.redirect_uri)
+
+        instructions = QLabel(
+            "Create these values in the Spotify Developer Dashboard. "
+            "They are saved only to the local .env file."
+        )
+        instructions.setWordWrap(True)
+        instructions.setObjectName("mutedText")
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.save)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Connect SpotiWord to Spotify"))
+        layout.addWidget(instructions)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+    @Slot()
+    def save(self):
+        values = {
+            "SPOTIFY_CLIENT_ID": self.client_id.text(),
+            "SPOTIFY_CLIENT_SECRET": self.client_secret.text(),
+            "SPOTIFY_REDIRECT_URI": self.redirect_uri.text(),
+        }
+        if any(not value.strip() for value in values.values()):
+            QMessageBox.warning(self, "Incomplete Configuration", "Please fill in every field.")
+            return
+        save_configuration(values)
+        self.accept()
 
 
 class SourceSetupWidget(QWidget):
@@ -469,6 +523,9 @@ class MainWindow(QMainWindow):
         self.start_button = QPushButton("Choose Library Source")
         self.start_button.setObjectName("primaryButton")
         self.start_button.clicked.connect(self.start_loading)
+        self.settings_button = QPushButton("Spotify Settings")
+        self.settings_button.setObjectName("linkButton")
+        self.settings_button.clicked.connect(self.show_configuration)
         self.cancel_button = QPushButton("Cancel Loading")
         self.cancel_button.clicked.connect(self.cancel_loading)
         self.cancel_button.setEnabled(False)
@@ -483,6 +540,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.status_label)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.start_button)
+        layout.addWidget(self.settings_button)
         layout.addWidget(self.cancel_button)
         container = QWidget()
         container.setLayout(layout)
@@ -491,6 +549,9 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def start_loading(self):
+        if missing_configuration():
+            if not self.show_configuration():
+                return
         self.start_button.setEnabled(False)
         self.status_label.setText("Connecting to Spotify...")
         self.progress_bar.setRange(0, 0)
@@ -534,6 +595,14 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(False)
         self.status_label.setText("Loading failed.")
         QMessageBox.critical(self, "SpotiWord Error", message)
+
+    @Slot()
+    def show_configuration(self):
+        dialog = ConfigurationDialog(self)
+        if dialog.exec() == QDialog.Accepted:
+            self.status_label.setText("Spotify configuration saved.")
+            return True
+        return False
 
     @Slot()
     def cancel_loading(self):
@@ -616,6 +685,7 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    configure_logging()
     app = QApplication(sys.argv)
     app.setStyleSheet(
         """

@@ -1,6 +1,9 @@
 import os
 import sys
+import logging
 from pathlib import Path
+
+import dotenv
 
 
 APP_NAME = "SpotiWord"
@@ -24,3 +27,31 @@ ENV_PATH = application_directory() / ".env"
 USER_DATA_PATH = user_data_directory()
 SPOTIFY_CACHE_PATH = USER_DATA_PATH / "spotify.cache"
 LYRICS_CACHE_PATH = USER_DATA_PATH / "lyrics_cache.json"
+LOG_PATH = USER_DATA_PATH / "spotiword.log"
+REQUIRED_CONFIG_KEYS = (
+    "SPOTIFY_CLIENT_ID",
+    "SPOTIFY_CLIENT_SECRET",
+    "SPOTIFY_REDIRECT_URI",
+)
+
+
+def missing_configuration():
+    return [key for key in REQUIRED_CONFIG_KEYS if not os.getenv(key)]
+
+
+def save_configuration(values):
+    ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = ENV_PATH.with_suffix(".tmp")
+    content = "\n".join(f"{key}={values.get(key, '').strip()}" for key in REQUIRED_CONFIG_KEYS) + "\n"
+    temporary_path.write_text(content, encoding="utf-8")
+    temporary_path.replace(ENV_PATH)
+    dotenv.load_dotenv(ENV_PATH, override=True)
+
+
+def configure_logging():
+    USER_DATA_PATH.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        filename=LOG_PATH,
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
