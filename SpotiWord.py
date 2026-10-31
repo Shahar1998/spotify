@@ -62,6 +62,15 @@ def calculate_round_score(is_correct, elapsed_time, streak):
     return (base_points + speed_bonus) * streak
 
 
+def get_decoy_indices(df, target_word):
+    """Return track indices whose lyrics do not contain the target word."""
+    return [
+        idx
+        for idx, lyrics in df['Lyrics'].items()
+        if target_word not in set(tokenize_words(str(lyrics)))
+    ]
+
+
 def fetch_lrclib_lyrics(track_name, artist_name):
     """Fetches plain lyrics from LRCLIB API without requiring an API key."""
     url = "https://lrclib.net/api/get"
@@ -188,13 +197,15 @@ def start_lyric_game(df, language_name, difficulty_level):
             target_word, freq = random.choice(top_words[1:])
         
         indices = word_to_tracks.get(target_word, [])
-        if 1 <= len(indices) <= 8:
+        decoy_indices = get_decoy_indices(df, target_word)
+        if 1 <= len(indices) <= 8 and len(decoy_indices) >= 3:
             if not any(item['target_word'] == target_word for item in valid_rounds_data):
                 clue = get_lyric_snippet_clue(lyrics_text, target_word)
                 valid_rounds_data.append({
                     'target_word': target_word,
                     'correct_idx': idx,
-                    'clue': clue
+                    'clue': clue,
+                    'decoy_indices': decoy_indices
                 })
 
     if not valid_rounds_data:
@@ -218,15 +229,8 @@ def start_lyric_game(df, language_name, difficulty_level):
         correct_track = df.loc[correct_idx]
         correct_dict = correct_track.to_dict()
 
-        # Pick 3 decoy songs that do NOT contain the target word
-        decoy_df = df[
-            ~df['Lyrics'].map(
-                lambda lyrics: target_word in set(tokenize_words(lyrics))
-            )
-        ]
-        if len(decoy_df) < 3:
-            continue
-            
+        # These decoys were validated when the round was created.
+        decoy_df = df.loc[round_info['decoy_indices']]
         decoys = decoy_df.sample(n=3)
         options = [correct_dict] + decoys.to_dict('records')
         random.shuffle(options)

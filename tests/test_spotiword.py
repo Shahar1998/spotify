@@ -1,9 +1,11 @@
 import pytest
+import pandas as pd
 
 from SpotiWord import (
     clean_track_name,
     calculate_round_score,
     create_spotify_client,
+    get_decoy_indices,
     get_lyric_snippet_clue,
     is_hebrew,
     tokenize_words,
@@ -53,3 +55,14 @@ def test_calculate_round_score_applies_base_speed_and_streak():
 
 def test_calculate_round_score_returns_zero_for_incorrect_answers():
     assert calculate_round_score(False, elapsed_time=2, streak=4) == 0
+
+
+def test_get_decoy_indices_guarantees_whole_word_exclusion():
+    songs = pd.DataFrame(
+        {
+            "Lyrics": ["art art", "party", "music", "artificial", "dancing"]
+        },
+        index=[10, 20, 30, 40, 50],
+    )
+
+    assert get_decoy_indices(songs, "art") == [20, 30, 40, 50]
