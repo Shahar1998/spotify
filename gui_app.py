@@ -5,6 +5,7 @@ from core import (
     __version__,
     build_round_options,
     calculate_round_score,
+    is_hebrew,
     prepare_game_rounds,
 )
 from models import Song
@@ -211,6 +212,9 @@ class GameWidget(QWidget):
         self.streak_label.setText(f"STREAK {self.streak}")
         self.word_label.setText(round_info['target_word'].upper())
         self.clue_label.setText(round_info['clue'])
+        self.clue_label.setAlignment(
+            Qt.AlignRight if is_hebrew(round_info['clue']) else Qt.AlignLeft
+        )
         self.album_art_label.clear()
         self.album_art_label.setVisible(False)
         self.result_label.clear()

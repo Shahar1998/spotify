@@ -2,7 +2,8 @@ import json
 
 import pytest
 from models import Song
-from lyrics_client import fetch_lrclib_lyrics
+from core import HEBREW_STOP_WORDS, strip_hebrew_niqqud
+from lyrics_client import LyricsCache, fetch_lrclib_lyrics
 
 from SpotiWord import (
     clean_track_name,
@@ -20,6 +21,16 @@ from SpotiWord import (
 def test_clean_track_name_removes_feature_and_remix_tags():
     assert clean_track_name("Song Title (feat. Guest Artist)") == "Song Title"
     assert clean_track_name("Song Title (Remix)") == "Song Title"
+    assert clean_track_name("Song Title [feat. Guest Artist]") == "Song Title"
+    assert clean_track_name("Song Title - 2011 Remaster") == "Song Title"
+
+
+def test_hebrew_niqqud_is_removed_and_stop_words_exist():
+    hebrew_with_marks = "\u05e9\u05b8\u05dc\u05d5\u05dd"
+
+    assert strip_hebrew_niqqud(hebrew_with_marks) == "\u05e9\u05dc\u05d5\u05dd"
+    assert "\u05e9\u05dc" in HEBREW_STOP_WORDS
+    assert "\u05d0\u05e0\u05d9" in HEBREW_STOP_WORDS
 
 
 def test_is_hebrew_detects_hebrew_text():
@@ -153,6 +164,18 @@ def test_expired_missing_lyrics_cache_is_retried(tmp_path):
     )
 
     assert result == "Lyrics are available now"
+
+
+def test_lyrics_cache_flushes_and_reloads(tmp_path):
+    cache_path = tmp_path / "lyrics.json"
+    cache = LyricsCache(cache_path)
+    cache.set("song::artist", "Lyrics in memory")
+
+    assert cache.get("song::artist") == "Lyrics in memory"
+    cache.flush()
+
+    reloaded_cache = LyricsCache(cache_path)
+    assert reloaded_cache.get("song::artist") == "Lyrics in memory"
 
 
 def test_song_model_preserves_game_metadata():

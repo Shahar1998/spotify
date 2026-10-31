@@ -91,18 +91,20 @@ def load_and_categorize_songs(spotify_client, max_songs=100, progress_callback=N
 
     english_songs, hebrew_songs = [], []
     lyrics_cache = LyricsCache()
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = [executor.submit(_build_song_entry, item, lyrics_cache) for item in selected_items]
-        for number, future in enumerate(as_completed(futures), 1):
-            if cancel_callback and cancel_callback():
-                for pending in futures:
-                    pending.cancel()
-                raise LoadingCancelled()
-            result = future.result()
-            if progress_callback:
-                progress_callback(number, len(selected_items), f'Fetching lyrics: {number}/{len(selected_items)}')
-            if result:
-                song, hebrew = result
-                (hebrew_songs if hebrew else english_songs).append(song)
-    lyrics_cache.flush()
+    try:
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(_build_song_entry, item, lyrics_cache) for item in selected_items]
+            for number, future in enumerate(as_completed(futures), 1):
+                if cancel_callback and cancel_callback():
+                    for pending in futures:
+                        pending.cancel()
+                    raise LoadingCancelled()
+                result = future.result()
+                if progress_callback:
+                    progress_callback(number, len(selected_items), f'Fetching lyrics: {number}/{len(selected_items)}')
+                if result:
+                    song, hebrew = result
+                    (hebrew_songs if hebrew else english_songs).append(song)
+    finally:
+        lyrics_cache.flush()
     return english_songs, hebrew_songs
