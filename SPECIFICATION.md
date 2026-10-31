@@ -14,6 +14,7 @@ Current release: `0.1.0` (development release).
 - `python-dotenv` for local configuration
 - `pandas` for song data and filtering
 - `pytest` for automated tests
+- `PySide6` for the desktop GUI
 - LRCLIB for plain lyric retrieval
 
 Required environment variables:
@@ -31,6 +32,7 @@ Secrets and OAuth tokens must remain local and must never be committed to Git.
 ```text
 SpotiWord.py       Application orchestration, game flow, scoring, and word analysis
 lyrics_client.py   LRCLIB requests, retries, response handling, and lyric caching
+gui_app.py         PySide6 desktop interface and background library loading
 tests/             Automated tests for pure and isolated behavior
 ```
 
@@ -109,7 +111,11 @@ An incorrect answer gives zero points and resets the streak. Timing uses a monot
 - Private files must remain excluded by `.gitignore`.
 - Release versions use Semantic Versioning and Git tags such as `v0.1.0`.
 
-## 11. Planned improvements
+## 11. GUI requirements
+
+The GUI must keep Spotify and LRCLIB work off the main UI thread. While loading, it must display progress and remain responsive. The current GUI provides loading, language and difficulty setup, five-round gameplay, timer-based scoring, and a results dialog while reusing the same game rules as the terminal version.
+
+## 12. Planned improvements
 
 - Fetch all saved tracks through Spotify pagination.
 - Improve metadata cleaning for more release-tag formats.

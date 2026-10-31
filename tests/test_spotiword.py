@@ -9,6 +9,8 @@ from SpotiWord import (
     get_decoy_indices,
     get_lyric_snippet_clue,
     is_hebrew,
+    build_round_options,
+    prepare_game_rounds,
     tokenize_words,
 )
 
@@ -67,6 +69,29 @@ def test_get_decoy_indices_guarantees_whole_word_exclusion():
     )
 
     assert get_decoy_indices(songs, "art") == [20, 30, 40, 50]
+
+
+def test_prepare_game_rounds_and_options_are_playable():
+    songs = pd.DataFrame(
+        {
+            "Track Name": ["Track One", "Track Two", "Track Three", "Track Four"],
+            "Artist": ["Artist A", "Artist B", "Artist C", "Artist D"],
+            "Lyrics": [
+                "summer summer summer in the night",
+                "ocean ocean ocean in the night",
+                "mountain mountain mountain in the night",
+                "forest forest forest in the night",
+            ],
+            "Has Real Lyrics": [True, True, True, True],
+        }
+    )
+
+    rounds = prepare_game_rounds(songs, "easy", max_rounds=5)
+    options, correct_option = build_round_options(songs, rounds[0])
+
+    assert len(rounds) == 4
+    assert len(options) == 4
+    assert 1 <= correct_option <= 4
 
 
 def test_fetch_lrclib_lyrics_caches_successful_response(tmp_path):

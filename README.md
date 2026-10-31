@@ -41,6 +41,14 @@ Never commit `.env`, Spotify tokens, `.cache`, or personal library exports.
 python SpotiWord.py
 ```
 
+To launch the GUI loading window:
+
+```powershell
+python gui_app.py
+```
+
+The GUI provides a responsive library-loading screen, language and difficulty setup, five-round gameplay, timer-based scoring, and a results dialog. Spotify and lyric loading run in the background so the window remains responsive.
+
 The first run may open a browser for Spotify authorization. Spotify authentication is created only when the application starts; importing the module does not trigger login.
 
 ## Test
@@ -58,6 +66,7 @@ The tests cover title cleanup, Hebrew detection, clue generation, word boundarie
 ```text
 SpotiWord.py          Main application and game flow
 lyrics_client.py      LRCLIB access, retries, and local lyric cache
+gui_app.py            PySide6 GUI loading window
 tests/                Automated tests
 SPECIFICATION.md      Product behavior and technical requirements
 requirements.txt      Python dependencies

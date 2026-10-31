@@ -3,7 +3,7 @@ import random
 import re
 import time
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 import dotenv
@@ -11,6 +11,13 @@ import pandas as pd
 from lyrics_client import fetch_lrclib_lyrics
 
 __version__ = "0.1.0"
+
+STOP_WORDS = {
+    'the', 'a', 'an', 'and', 'in', 'on', 'at', 'to', 'for', 'of', 'with',
+    'you', 'i', 'me', 'my', 'it', 'is', 'chorus', 'verse', 'embedding',
+    'contributor', 'feat', 'oh', 'yeah', 'like', 'just', 'that', 'this',
+    'your'
+}
 
 dotenv.load_dotenv()
 
@@ -72,6 +79,61 @@ def get_decoy_indices(df, target_word):
     ]
 
 
+def prepare_game_rounds(df, difficulty_level, max_rounds=5):
+    """Create playable rounds using the same rules for CLI and GUI games."""
+    word_to_tracks = {}
+    for idx, row in df.iterrows():
+        words = tokenize_words(row['Lyrics'])
+        for word in set(words):
+            if len(word) > 3 and word not in STOP_WORDS and any(c.isalpha() for c in word):
+                word_to_tracks.setdefault(word, []).append(idx)
+
+    valid_rounds = []
+    real_lyrics_df = df[df['Has Real Lyrics'] == True]
+    for idx, row in real_lyrics_df.iterrows():
+        title_words = set(tokenize_words(row['Track Name']))
+        artist_words = set(tokenize_words(row['Artist']))
+        excluded_words = STOP_WORDS.union(title_words).union(artist_words)
+        filtered_words = [
+            word for word in tokenize_words(row['Lyrics'])
+            if len(word) > 3
+            and word not in excluded_words
+            and any(c.isalpha() for c in word)
+        ]
+        if not filtered_words:
+            continue
+
+        top_words = Counter(filtered_words).most_common(5)
+        if difficulty_level == 'easy' or len(top_words) == 1:
+            target_word = top_words[0][0]
+        else:
+            target_word = random.choice(top_words[1:])[0]
+
+        decoy_indices = get_decoy_indices(df, target_word)
+        if (
+            1 <= len(word_to_tracks.get(target_word, [])) <= 8
+            and len(decoy_indices) >= 3
+            and not any(item['target_word'] == target_word for item in valid_rounds)
+        ):
+            valid_rounds.append({
+                'target_word': target_word,
+                'correct_idx': idx,
+                'clue': get_lyric_snippet_clue(row['Lyrics'], target_word),
+                'decoy_indices': decoy_indices,
+            })
+
+    return random.sample(valid_rounds, min(max_rounds, len(valid_rounds)))
+
+
+def build_round_options(df, round_info):
+    """Build shuffled answer options and return the correct option index."""
+    correct_dict = df.loc[round_info['correct_idx']].to_dict()
+    decoy_df = df.loc[round_info['decoy_indices']]
+    options = [correct_dict] + decoy_df.sample(n=3).to_dict('records')
+    random.shuffle(options)
+    return options, options.index(correct_dict) + 1
+
+
 def is_hebrew(text):
     """Detects if a string contains Hebrew characters."""
     return bool(re.search(r'[\u0590-\u05FF]', text))
@@ -120,7 +182,7 @@ def _build_song_entry(item):
     }, is_heb
 
 
-def load_and_categorize_songs(spotify_client, max_songs=200):
+def load_and_categorize_songs(spotify_client, max_songs=200, progress_callback=None):
     """Load a random sample of saved songs and retrieve their lyrics."""
     print("Loading your saved-song list from Spotify...")
     page_size = 50
@@ -139,14 +201,19 @@ def load_and_categorize_songs(spotify_client, max_songs=200):
     selected_items = random.sample(all_items, sample_size)
     print(f"Selected {sample_size} random tracks from {len(all_items)} saved songs.")
     print("Fetching lyrics (cached results are reused)...")
+    if progress_callback:
+        progress_callback(0, sample_size, f"Selected {sample_size} random tracks")
 
     english_songs = []
     hebrew_songs = []
 
     with ThreadPoolExecutor(max_workers=8) as executor:
-        results = executor.map(_build_song_entry, selected_items)
-        for number, result in enumerate(results, 1):
+        futures = [executor.submit(_build_song_entry, item) for item in selected_items]
+        for number, future in enumerate(as_completed(futures), 1):
+            result = future.result()
             print(f"\rFetching lyrics: {number}/{sample_size}", end='', flush=True)
+            if progress_callback:
+                progress_callback(number, sample_size, f"Fetching lyrics: {number}/{sample_size}")
             if not result:
                 continue
             song_entry, is_heb = result
@@ -164,63 +231,14 @@ def start_lyric_game(df, language_name, difficulty_level):
         print(f"\nNot enough {language_name} songs found to start a game session (minimum 4 required).")
         return
 
-    stop_words = {'the', 'a', 'an', 'and', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'you', 'i', 'me', 'my', 'it', 'is', 'chorus', 'verse', 'embedding', 'contributor', 'feat', 'oh', 'yeah', 'like', 'just', 'that', 'this', 'your'}
-    
-    word_to_tracks = {}
-    for idx, row in df.iterrows():
-        words = tokenize_words(row['Lyrics'])
-        for w in set(words):
-            if len(w) > 3 and w not in stop_words and any(c.isalpha() for c in w):
-                if w not in word_to_tracks:
-                    word_to_tracks[w] = []
-                word_to_tracks[w].append(idx)
-
-    valid_rounds_data = []
-    real_lyrics_df = df[df['Has Real Lyrics'] == True]
-    
-    for idx, row in real_lyrics_df.iterrows():
-        lyrics_text = row['Lyrics']
-        title_words = set(tokenize_words(row['Track Name']))
-        artist_words = set(tokenize_words(row['Artist']))
-        excluded_words = stop_words.union(title_words).union(artist_words)
-        
-        words = tokenize_words(lyrics_text)
-        filtered_words = [
-            w for w in words 
-            if len(w) > 3 and w not in excluded_words and any(c.isalpha() for c in w)
-        ]
-        
-        if not filtered_words:
-            continue
-            
-        word_counts = Counter(filtered_words)
-        top_words = word_counts.most_common(5)
-        
-        if difficulty_level == 'easy' or len(top_words) == 1:
-            target_word, freq = top_words[0]
-        else:
-            target_word, freq = random.choice(top_words[1:])
-        
-        indices = word_to_tracks.get(target_word, [])
-        decoy_indices = get_decoy_indices(df, target_word)
-        if 1 <= len(indices) <= 8 and len(decoy_indices) >= 3:
-            if not any(item['target_word'] == target_word for item in valid_rounds_data):
-                clue = get_lyric_snippet_clue(lyrics_text, target_word)
-                valid_rounds_data.append({
-                    'target_word': target_word,
-                    'correct_idx': idx,
-                    'clue': clue,
-                    'decoy_indices': decoy_indices
-                })
-
-    if not valid_rounds_data:
+    selected_rounds = prepare_game_rounds(df, difficulty_level)
+    if not selected_rounds:
         print(f"\nNo suitable signature words found in your {language_name} song pool.")
         return
 
     score = 0
     streak = 0
-    total_rounds = min(5, len(valid_rounds_data))
-    selected_rounds = random.sample(valid_rounds_data, total_rounds)
+    total_rounds = len(selected_rounds)
 
     print("\n" + "="*50)
     print(f"SpotiWord v{__version__}")
@@ -229,17 +247,9 @@ def start_lyric_game(df, language_name, difficulty_level):
 
     for round_num, round_info in enumerate(selected_rounds, 1):
         target_word = round_info['target_word']
-        correct_idx = round_info['correct_idx']
         clue = round_info['clue']
-        correct_track = df.loc[correct_idx]
-        correct_dict = correct_track.to_dict()
-
-        # These decoys were validated when the round was created.
-        decoy_df = df.loc[round_info['decoy_indices']]
-        decoys = decoy_df.sample(n=3)
-        options = [correct_dict] + decoys.to_dict('records')
-        random.shuffle(options)
-        correct_option_num = options.index(correct_dict) + 1
+        options, correct_option_num = build_round_options(df, round_info)
+        correct_track = df.loc[round_info['correct_idx']]
 
         print(f"\n--- Round {round_num} of {total_rounds} | Current Score: {score} | Streak: {streak} 🔥 ---")
         print(f"Signature Word: **\"{target_word.upper()}\"**")
@@ -281,7 +291,7 @@ def start_lyric_game(df, language_name, difficulty_level):
 
 if __name__ == '__main__':
     spotify_client = create_spotify_client()
-    df_english, df_hebrew = load_and_categorize_songs(spotify_client, max_songs=200)
+    df_english, df_hebrew = load_and_categorize_songs(spotify_client, max_songs=100)
     
     print("Select Game Language:")
     print("  [1] English Songs")
