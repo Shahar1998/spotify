@@ -2,7 +2,7 @@
 
 SpotiWord is a terminal-based lyric trivia game for songs saved in a user's Spotify library. It retrieves lyrics from LRCLIB, identifies signature words, creates multiple-choice rounds, and provides Spotify links for the songs.
 
-Current version: **0.2.1**
+Current version: **0.3.0**
 
 ## Requirements
 
@@ -104,4 +104,4 @@ The project follows Semantic Versioning:
 MAJOR.MINOR.PATCH
 ```
 
-The current release is `0.2.1`. Git release tags use the `v` prefix, for example `v0.2.1`.
+The current release is `0.3.0`. Git release tags use the `v` prefix, for example `v0.3.0`.

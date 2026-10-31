@@ -104,7 +104,7 @@ def fetch_lrclib_lyrics(
         'artist_name': artist_name,
     }
     request_headers = {
-        'User-Agent': 'SpotiWord/0.2.1',
+        'User-Agent': 'SpotiWord/0.3.0',
     }
 
     try:
