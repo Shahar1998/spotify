@@ -5,6 +5,7 @@ from SpotiWord import (
     create_spotify_client,
     get_lyric_snippet_clue,
     is_hebrew,
+    tokenize_words,
 )
 
 
@@ -24,6 +25,14 @@ def test_get_lyric_snippet_clue_blanks_target_word():
     clue = get_lyric_snippet_clue(lyrics, "signature")
 
     assert clue == 'Line Clue: "This is the ____ word in this line"'
+
+
+def test_word_matching_does_not_match_substrings():
+    assert tokenize_words("party art") == ["party", "art"]
+
+    clue = get_lyric_snippet_clue("The party starts\nThe art is here", "art")
+
+    assert clue == 'Line Clue: "The ____ is here"'
 
 
 def test_create_spotify_client_reports_missing_configuration(monkeypatch):

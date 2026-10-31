@@ -46,6 +46,12 @@ def clean_track_name(name):
     name = re.sub(r'\(remix.*?\)', '', name, flags=re.IGNORECASE)
     return name.strip()
 
+
+def tokenize_words(text):
+    """Return lowercase alphabetic words, including contractions."""
+    return re.findall(r"[^\W\d_]+(?:['’][^\W\d_]+)*", text.lower(), re.UNICODE)
+
+
 def fetch_lrclib_lyrics(track_name, artist_name):
     """Fetches plain lyrics from LRCLIB API without requiring an API key."""
     url = "https://lrclib.net/api/get"
@@ -74,7 +80,10 @@ def is_hebrew(text):
 def get_lyric_snippet_clue(lyrics_text, target_word):
     """Finds a single line of lyrics containing the target word and blanks it out."""
     lines = lyrics_text.split('\n')
-    pattern = re.compile(re.escape(target_word), re.IGNORECASE)
+    pattern = re.compile(
+        rf"(?<!\w){re.escape(target_word)}(?!\w)",
+        re.IGNORECASE
+    )
     
     for line in lines:
         cleaned_line = line.strip()
@@ -135,8 +144,7 @@ def start_lyric_game(df, language_name, difficulty_level):
     
     word_to_tracks = {}
     for idx, row in df.iterrows():
-        lyrics_text = row['Lyrics'].lower()
-        words = [w.strip('(),.-[]"\'?!').lower() for w in lyrics_text.split()]
+        words = tokenize_words(row['Lyrics'])
         for w in set(words):
             if len(w) > 3 and w not in stop_words and any(c.isalpha() for c in w):
                 if w not in word_to_tracks:
@@ -148,11 +156,11 @@ def start_lyric_game(df, language_name, difficulty_level):
     
     for idx, row in real_lyrics_df.iterrows():
         lyrics_text = row['Lyrics']
-        title_words = set(w.strip('(),.-[]"\'?!').lower() for w in row['Track Name'].split())
-        artist_words = set(w.strip('(),.-[]"\'?!').lower() for w in row['Artist'].split())
+        title_words = set(tokenize_words(row['Track Name']))
+        artist_words = set(tokenize_words(row['Artist']))
         excluded_words = stop_words.union(title_words).union(artist_words)
         
-        words = [w.strip('(),.-[]"\'?!').lower() for w in lyrics_text.lower().split()]
+        words = tokenize_words(lyrics_text)
         filtered_words = [
             w for w in words 
             if len(w) > 3 and w not in excluded_words and any(c.isalpha() for c in w)
@@ -201,7 +209,11 @@ def start_lyric_game(df, language_name, difficulty_level):
         correct_dict = correct_track.to_dict()
 
         # Pick 3 decoy songs that do NOT contain the target word
-        decoy_df = df[~df['Lyrics'].str.lower().str.contains(target_word, regex=False)]
+        decoy_df = df[
+            ~df['Lyrics'].map(
+                lambda lyrics: target_word in set(tokenize_words(lyrics))
+            )
+        ]
         if len(decoy_df) < 3:
             continue
             
