@@ -4,7 +4,7 @@ import pytest
 from models import Song
 from core import HEBREW_STOP_WORDS, strip_hebrew_niqqud
 from lyrics_client import LyricsCache, fetch_lrclib_lyrics
-from spotify_service import list_spotify_sources
+from spotify_service import list_spotify_sources, start_track_playback
 
 from SpotiWord import (
     clean_track_name,
@@ -207,3 +207,26 @@ def test_spotify_sources_include_liked_songs_and_playlists():
 
     assert sources[0] == {"id": None, "name": "Liked Songs", "kind": "liked"}
     assert sources[1]["name"] == "Road Trip"
+
+
+def test_start_track_playback_targets_active_device():
+    class FakeSpotifyClient:
+        def __init__(self):
+            self.started = None
+
+        def devices(self):
+            return {"devices": [
+                {"id": "inactive", "is_active": False, "is_restricted": False},
+                {"id": "active", "is_active": True, "is_restricted": False},
+            ]}
+
+        def start_playback(self, **kwargs):
+            self.started = kwargs
+
+    client = FakeSpotifyClient()
+    start_track_playback(client, "spotify:track:example")
+
+    assert client.started == {
+        "device_id": "active",
+        "uris": ["spotify:track:example"],
+    }

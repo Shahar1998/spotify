@@ -21,6 +21,7 @@ from spotify_service import (
     create_spotify_client,
     list_spotify_sources,
     load_and_categorize_songs,
+    start_track_playback,
 )
 from PySide6.QtCore import (
     QByteArray,
@@ -187,6 +188,24 @@ class SourceLoader(QObject):
         except Exception as error:
             logging.exception("Spotify source loading failed")
             self.failed.emit(str(error))
+
+
+class PlaybackWorker(QObject):
+    finished = Signal(bool, str)
+
+    def __init__(self, spotify_uri):
+        super().__init__()
+        self.spotify_uri = spotify_uri
+
+    @Slot()
+    def run(self):
+        try:
+            client = create_spotify_client()
+            start_track_playback(client, self.spotify_uri)
+            self.finished.emit(True, "Playing the correct song on Spotify.")
+        except Exception as error:
+            logging.exception("Spotify playback failed")
+            self.finished.emit(False, str(error))
 
 
 class ConfigurationDialog(QDialog):
@@ -373,6 +392,9 @@ class GameWidget(QWidget):
         self.answered_current_round = False
         self.used_fifty_fifty = False
         self.used_time_boost = False
+        self.playback_enabled = False
+        self.playback_thread = None
+        self.playback_worker = None
         self.options = []
         self.correct_option = 0
         self.answer_buttons = []
@@ -399,6 +421,13 @@ class GameWidget(QWidget):
         self.time_boost_button.setObjectName("linkButton")
         self.time_boost_button.setVisible(mode == "blitz")
         self.time_boost_button.clicked.connect(self.use_time_boost)
+        self.playback_toggle = QPushButton("Spotify: Off")
+        self.playback_toggle.setObjectName("linkButton")
+        self.playback_toggle.clicked.connect(self.toggle_playback)
+        self.play_button = QPushButton("▶ Play Correct Song")
+        self.play_button.setObjectName("linkButton")
+        self.play_button.setVisible(False)
+        self.play_button.clicked.connect(self.play_correct_song)
         self.time_bar = QProgressBar()
         self.time_bar.setRange(0, self.blitz_total_ms)
         self.time_bar.setValue(self.blitz_total_ms)
@@ -466,12 +495,14 @@ class GameWidget(QWidget):
         powerups = QHBoxLayout()
         powerups.addWidget(self.fifty_button)
         powerups.addWidget(self.time_boost_button)
+        powerups.addWidget(self.playback_toggle)
         layout.addLayout(powerups)
         layout.addWidget(clue_panel)
         layout.addWidget(self.album_art_label, alignment=Qt.AlignCenter)
         layout.addLayout(answers)
         layout.addLayout(links)
         layout.addWidget(self.result_label)
+        layout.addWidget(self.play_button)
         layout.addWidget(self.next_button)
         layout.addWidget(self.change_source_button)
         self.show_round()
@@ -491,6 +522,7 @@ class GameWidget(QWidget):
         self.album_art_label.setVisible(False)
         self.result_label.clear()
         self.next_button.setVisible(False)
+        self.play_button.setVisible(False)
         self.answered_current_round = False
 
         for button, option in zip(self.answer_buttons, self.options):
@@ -594,7 +626,12 @@ class GameWidget(QWidget):
             link_button.setVisible(bool(option.spotify_url))
 
         self.load_album_art(self.options[self.correct_option - 1].album_art_url)
-        self.next_button.setText("Finish Game" if self.round_number + 1 == len(self.rounds) else "Next Round")
+        self.play_button.setVisible(True)
+        if self.playback_enabled:
+            self.play_correct_song()
+        self.next_button.setText(
+            "Finish Game" if self.round_number + 1 == len(self.rounds) else "Next Question"
+        )
         self.next_button.setVisible(True)
 
     @Slot()
@@ -635,6 +672,54 @@ class GameWidget(QWidget):
     def toggle_sound(self):
         enabled = self.sounds.toggle()
         self.sound_button.setText("🔊 Sound On" if enabled else "🔇 Sound Off")
+
+    @Slot()
+    def toggle_playback(self):
+        self.playback_enabled = not self.playback_enabled
+        self.playback_toggle.setText(
+            "Spotify: On" if self.playback_enabled else "Spotify: Off"
+        )
+
+    @Slot()
+    def play_correct_song(self):
+        if not self.options:
+            return
+        correct_song = self.options[self.correct_option - 1]
+        if not correct_song.spotify_uri:
+            self.result_label.setText("This track cannot be played through Spotify.")
+            return
+        if self.playback_thread:
+            try:
+                if self.playback_thread.isRunning():
+                    return
+            except RuntimeError:
+                # Qt has already destroyed the finished thread wrapper.
+                self.playback_thread = None
+                self.playback_worker = None
+        self.result_label.setText("Connecting to Spotify playback...")
+        self.play_button.setEnabled(False)
+        self.play_button.setText("Connecting to Spotify...")
+        self.playback_thread = QThread(self)
+        self.playback_worker = PlaybackWorker(correct_song.spotify_uri)
+        self.playback_worker.moveToThread(self.playback_thread)
+        self.playback_thread.started.connect(self.playback_worker.run)
+        self.playback_worker.finished.connect(self.playback_finished)
+        self.playback_worker.finished.connect(self.playback_thread.quit)
+        self.playback_thread.finished.connect(self.playback_thread_finished)
+        self.playback_thread.finished.connect(self.playback_worker.deleteLater)
+        self.playback_thread.finished.connect(self.playback_thread.deleteLater)
+        self.playback_thread.start()
+
+    @Slot(bool, str)
+    def playback_finished(self, success, message):
+        self.play_button.setEnabled(True)
+        self.play_button.setText("▶ Play Correct Song")
+        self.result_label.setText(message if success else f"Spotify playback unavailable: {message}")
+
+    @Slot()
+    def playback_thread_finished(self):
+        self.playback_thread = None
+        self.playback_worker = None
 
     @Slot()
     def open_spotify_link(self):

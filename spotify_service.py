@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import dotenv
 import spotipy
+from spotipy.exceptions import SpotifyException
 from spotipy.oauth2 import SpotifyOAuth
 
 from config import ENV_PATH, SPOTIFY_CACHE_PATH
@@ -38,7 +39,7 @@ def create_spotify_client():
         client_id=client_id,
         client_secret=client_secret,
         redirect_uri=redirect_uri,
-        scope='user-library-read playlist-read-private playlist-read-collaborative',
+        scope='user-library-read playlist-read-private playlist-read-collaborative user-read-playback-state user-modify-playback-state',
         cache_path=str(SPOTIFY_CACHE_PATH),
     ))
 
@@ -84,7 +85,34 @@ def _build_song_entry(item, lyrics_cache=None):
         lyrics=lyrics if has_real_lyrics else f'{original_name} {artist_name}',
         has_real_lyrics=has_real_lyrics,
         album_art_url=album_images[0].get('url') if album_images else None,
+        spotify_uri=track.get('uri'),
     ), is_hebrew(original_name) or is_hebrew(artist_name)
+
+
+def start_track_playback(spotify_client, spotify_uri):
+    """Start a track on an available Spotify Connect device."""
+    if not spotify_uri:
+        raise RuntimeError("This track has no Spotify playback URI.")
+    devices = spotify_client.devices().get('devices', [])
+    usable_devices = [
+        device for device in devices
+        if device.get('id') and not device.get('is_restricted')
+    ]
+    if not usable_devices:
+        raise RuntimeError("No Spotify device is available. Open Spotify and try again.")
+    device = next((item for item in usable_devices if item.get('is_active')), usable_devices[0])
+    try:
+        spotify_client.start_playback(device_id=device.get('id'), uris=[spotify_uri])
+    except SpotifyException as error:
+        if error.http_status == 403:
+            raise RuntimeError(
+                "Spotify rejected playback. This feature requires a Spotify Premium account."
+            ) from error
+        if error.http_status == 404:
+            raise RuntimeError(
+                "Spotify could not find the selected device. Keep Spotify open and try again."
+            ) from error
+        raise RuntimeError(f"Spotify playback failed ({error.http_status}).") from error
 
 
 def load_and_categorize_songs(

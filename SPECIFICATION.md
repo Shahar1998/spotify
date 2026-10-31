@@ -4,7 +4,7 @@
 
 SpotiWord is an interactive terminal trivia game based on a user's Spotify Liked Songs library. The game retrieves lyrics, identifies a signature word for a song, provides a lyric clue with the word hidden, and asks the player to select the matching song from four options.
 
-Current release: `0.3.0`.
+Current release: `0.3.0`. This document also describes unreleased v0.4 development features currently present in the working tree.
 
 ## 2. Technology and external services
 
@@ -46,7 +46,7 @@ Spotify authentication is created by `create_spotify_client()` when the applicat
 
 1. Fetch up to `max_songs` saved tracks from Spotify.
 2. Ignore unavailable or deleted Spotify tracks.
-3. Preserve the original track name, primary artist, Spotify URL, lyric text, and lyric availability flag.
+3. Preserve the original track name, primary artist, Spotify URL and URI, lyric text, and lyric availability flag.
 4. Remove common feature and remix tags before querying LRCLIB.
 5. Classify a track as Hebrew when its track name or primary artist contains Hebrew Unicode characters. All other tracks are placed in the English pool.
 
@@ -95,6 +95,12 @@ If no suitable line is found, the game displays a generic hidden-word clue.
 - Options are shuffled before display.
 - The player selects an option from 1 through 4.
 - Spotify URLs are displayed after each round.
+- The GUI can optionally start the correct track on an available Spotify Connect device after an answer.
+- Playback can be enabled automatically or started manually with **Play Correct Song**.
+- Starting playback must not advance the current question.
+- **Next Question** advances only when another valid round remains; **Finish Game** is used for the final valid round.
+- Playback failures must be shown as friendly status messages and must not interrupt the game.
+- Playback must explain when Spotify Premium or an available device is required.
 - Blitz mode displays a live countdown bar that changes from green to amber to red.
 - The GUI provides optional local sound cues for correct answers, wrong answers, streaks, and final countdown ticks.
 - Sound feedback can be muted during gameplay.
@@ -126,7 +132,7 @@ An incorrect answer gives zero points and resets the streak. Timing uses a monot
 
 ## 11. GUI requirements
 
-The GUI must keep Spotify and LRCLIB work off the main UI thread. While loading, it must display progress, support cancellation, and remain responsive. The current GUI provides Liked Songs and playlist selection, selectable sampling size, loading cancellation, language and difficulty setup, five-round gameplay, timer-based scoring, correct/wrong answer colors, clickable Spotify links, asynchronous album-art reveal, Hebrew RTL layout, local SQLite high-score history, a dark theme, and a results screen while reusing the same game rules as the terminal version.
+The GUI must keep Spotify, LRCLIB, playback, and album-art network work off the main UI thread. While loading, it must display progress, support cancellation, and remain responsive. The current GUI provides Liked Songs and playlist selection, selectable sampling size, loading cancellation, language and difficulty setup, Classic and Blitz gameplay, timer-based scoring, combo streaks, power-ups, achievements, correct/wrong answer colors, optional Spotify Connect playback, clickable Spotify links, asynchronous album-art reveal, Hebrew RTL layout, local SQLite high-score history, a dark theme, sound feedback with mute control, and a results screen while reusing the same game rules as the terminal version.
 
 ## 12. Planned improvements
 
@@ -135,8 +141,11 @@ The GUI must keep Spotify and LRCLIB work off the main UI thread. While loading,
 - Separate Spotify access, analysis, and terminal presentation into additional modules.
 - Add structured logging and a richer command-line interface.
 - Improve language detection beyond track and artist metadata.
-- Add a signed Windows installer and application icon.
+- Add code-signed Windows releases.
+- Add automated CI builds and GitHub Release uploads.
 
-## 13. v0.3 backlog
+## 13. v0.3 completed work
 
 - First-run configuration assistance and packaged-app diagnostics.
+- Random library sampling and playlist selection.
+- Responsive PySide6 GUI and Windows installer pipeline.
