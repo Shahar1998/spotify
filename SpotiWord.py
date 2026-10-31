@@ -3,6 +3,7 @@ import random
 import re
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 import dotenv
@@ -91,45 +92,70 @@ def get_lyric_snippet_clue(lyrics_text, target_word):
             
     return f"Line Clue: Contains the word '____'"
 
-def load_and_categorize_songs(spotify_client, max_songs=40):
-    print("Loading your saved songs from Spotify and categorizing by language...")
-    results = spotify_client.current_user_saved_tracks(limit=max_songs)
-    
+def _build_song_entry(item):
+    """Convert one Spotify saved-track item into a game song entry."""
+    track = item.get('track')
+    if not track or not track.get('artists'):
+        return None
+
+    original_name = track.get('name', '')
+    artist_name = track['artists'][0].get('name', '')
+    track_url = track.get('external_urls', {}).get('spotify', '')
+
+    track_name_cleaned = clean_track_name(original_name)
+    is_heb = is_hebrew(original_name) or is_hebrew(artist_name)
+
+    lyrics_text = fetch_lrclib_lyrics(track_name_cleaned, artist_name)
+    has_real_lyrics = bool(lyrics_text)
+
+    if not has_real_lyrics:
+        lyrics_text = f"{original_name} {artist_name}"
+
+    return {
+        'Track Name': original_name,
+        'Artist': artist_name,
+        'Spotify URL': track_url,
+        'Lyrics': lyrics_text,
+        'Has Real Lyrics': has_real_lyrics
+    }, is_heb
+
+
+def load_and_categorize_songs(spotify_client, max_songs=200):
+    """Load a random sample of saved songs and retrieve their lyrics."""
+    print("Loading your saved-song list from Spotify...")
+    page_size = 50
+    first_page = spotify_client.current_user_saved_tracks(limit=page_size, offset=0)
+    total_tracks = first_page.get('total', len(first_page.get('items', [])))
+    all_items = list(first_page.get('items', []))
+
+    for offset in range(page_size, total_tracks, page_size):
+        page = spotify_client.current_user_saved_tracks(
+            limit=page_size,
+            offset=offset,
+        )
+        all_items.extend(page.get('items', []))
+
+    sample_size = min(max_songs, len(all_items))
+    selected_items = random.sample(all_items, sample_size)
+    print(f"Selected {sample_size} random tracks from {len(all_items)} saved songs.")
+    print("Fetching lyrics (cached results are reused)...")
+
     english_songs = []
     hebrew_songs = []
-    
-    for item in results['items']:
-        track = item.get('track')
-        if not track:
-            continue
-            
-        original_name = track.get('name')
-        artist_name = track['artists'][0]['name']
-        track_url = track.get('external_urls', {}).get('spotify', '')
-        
-        track_name_cleaned = clean_track_name(original_name)
-        is_heb = is_hebrew(original_name) or is_hebrew(artist_name)
-        
-        lyrics_text = fetch_lrclib_lyrics(track_name_cleaned, artist_name)
-        has_real_lyrics = True
-        
-        if not lyrics_text:
-            has_real_lyrics = False
-            lyrics_text = f"{original_name} {artist_name}"
-            
-        song_entry = {
-            'Track Name': original_name,
-            'Artist': artist_name,
-            'Spotify URL': track_url,
-            'Lyrics': lyrics_text,
-            'Has Real Lyrics': has_real_lyrics
-        }
-        
-        if is_heb:
-            hebrew_songs.append(song_entry)
-        else:
-            english_songs.append(song_entry)
-            
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = executor.map(_build_song_entry, selected_items)
+        for number, result in enumerate(results, 1):
+            print(f"\rFetching lyrics: {number}/{sample_size}", end='', flush=True)
+            if not result:
+                continue
+            song_entry, is_heb = result
+            if is_heb:
+                hebrew_songs.append(song_entry)
+            else:
+                english_songs.append(song_entry)
+
+    print()
     print(f"\n[Language Split Summary] English tracks: {len(english_songs)} | Hebrew tracks: {len(hebrew_songs)}\n")
     return pd.DataFrame(english_songs), pd.DataFrame(hebrew_songs)
 
@@ -255,7 +281,7 @@ def start_lyric_game(df, language_name, difficulty_level):
 
 if __name__ == '__main__':
     spotify_client = create_spotify_client()
-    df_english, df_hebrew = load_and_categorize_songs(spotify_client, max_songs=40)
+    df_english, df_hebrew = load_and_categorize_songs(spotify_client, max_songs=200)
     
     print("Select Game Language:")
     print("  [1] English Songs")

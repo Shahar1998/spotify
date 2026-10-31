@@ -1,12 +1,14 @@
 import json
 import time
 from pathlib import Path
+from threading import Lock
 
 import requests
 
 
 DEFAULT_CACHE_PATH = Path('.lyrics_cache.json')
 RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+_CACHE_LOCK = Lock()
 
 
 def _cache_key(track_name, artist_name):
@@ -24,12 +26,15 @@ def _load_cache(cache_path):
 
 def _save_cache(cache_path, cache):
     try:
-        path = Path(cache_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary_path = path.with_suffix(path.suffix + '.tmp')
-        with temporary_path.open('w', encoding='utf-8') as cache_file:
-            json.dump(cache, cache_file, ensure_ascii=False, indent=2)
-        temporary_path.replace(path)
+        with _CACHE_LOCK:
+            path = Path(cache_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            merged_cache = _load_cache(path)
+            merged_cache.update(cache)
+            temporary_path = path.with_suffix(path.suffix + '.tmp')
+            with temporary_path.open('w', encoding='utf-8') as cache_file:
+                json.dump(merged_cache, cache_file, ensure_ascii=False, indent=2)
+            temporary_path.replace(path)
     except OSError:
         # A cache failure must not prevent the game from running.
         pass
