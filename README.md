@@ -65,6 +65,7 @@ The tests cover title cleanup, Hebrew detection, clue generation, word boundarie
 
 ```text
 SpotiWord.py          Main application and game flow
+models.py             Typed Song data model
 lyrics_client.py      LRCLIB access, retries, and local lyric cache
 gui_app.py            PySide6 GUI loading window
 tests/                Automated tests

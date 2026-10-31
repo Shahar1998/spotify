@@ -10,6 +10,7 @@ from spotipy.oauth2 import SpotifyOAuth
 import dotenv
 import pandas as pd
 from lyrics_client import LyricsCache, fetch_lrclib_lyrics
+from models import Song
 
 __version__ = "0.1.0"
 
@@ -202,6 +203,8 @@ def _build_song_entry(item, lyrics_cache=None):
     original_name = track.get('name', '')
     artist_name = track['artists'][0].get('name', '')
     track_url = track.get('external_urls', {}).get('spotify', '')
+    album_images = track.get('album', {}).get('images', [])
+    album_art_url = album_images[0].get('url') if album_images else None
 
     track_name_cleaned = clean_track_name(original_name)
     is_heb = is_hebrew(original_name) or is_hebrew(artist_name)
@@ -216,13 +219,14 @@ def _build_song_entry(item, lyrics_cache=None):
     if not has_real_lyrics:
         lyrics_text = f"{original_name} {artist_name}"
 
-    return {
-        'Track Name': original_name,
-        'Artist': artist_name,
-        'Spotify URL': track_url,
-        'Lyrics': lyrics_text,
-        'Has Real Lyrics': has_real_lyrics
-    }, is_heb
+    return Song(
+        track_name=original_name,
+        artist=artist_name,
+        spotify_url=track_url,
+        lyrics=lyrics_text,
+        has_real_lyrics=has_real_lyrics,
+        album_art_url=album_art_url,
+    ), is_heb
 
 
 def load_and_categorize_songs(
@@ -284,10 +288,11 @@ def load_and_categorize_songs(
             if not result:
                 continue
             song_entry, is_heb = result
+            song_record = song_entry.to_record()
             if is_heb:
-                hebrew_songs.append(song_entry)
+                hebrew_songs.append(song_record)
             else:
-                english_songs.append(song_entry)
+                english_songs.append(song_record)
 
     lyrics_cache.flush()
     print()

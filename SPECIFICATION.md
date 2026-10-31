@@ -31,6 +31,7 @@ Secrets and OAuth tokens must remain local and must never be committed to Git.
 
 ```text
 SpotiWord.py       Application orchestration, game flow, scoring, and word analysis
+models.py          Typed `Song` data model shared by services and interfaces
 lyrics_client.py   LRCLIB requests, retries, response handling, and lyric caching
 gui_app.py         PySide6 desktop interface and background library loading
 tests/             Automated tests for pure and isolated behavior

@@ -2,6 +2,7 @@ import json
 
 import pytest
 import pandas as pd
+from models import Song
 from lyrics_client import fetch_lrclib_lyrics
 
 from SpotiWord import (
@@ -160,3 +161,19 @@ def test_expired_missing_lyrics_cache_is_retried(tmp_path):
     )
 
     assert result == "Lyrics are available now"
+
+
+def test_song_model_preserves_game_metadata():
+    song = Song(
+        track_name="Example",
+        artist="Artist",
+        spotify_url="https://open.spotify.com/track/example",
+        lyrics="Example lyrics",
+        has_real_lyrics=True,
+        album_art_url="https://images.example/art.jpg",
+    )
+
+    record = song.to_record()
+
+    assert record["Track Name"] == "Example"
+    assert record["Album Art URL"].endswith("art.jpg")
