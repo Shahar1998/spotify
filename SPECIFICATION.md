@@ -88,11 +88,20 @@ If no suitable line is found, the game displays a generic hidden-word clue.
 
 ## 8. Gameplay
 
-- A session contains up to five valid rounds.
+- Classic mode contains up to five valid rounds.
+- Blitz mode starts with 60 seconds and presents valid rounds continuously until time expires.
+- In Blitz mode, a correct answer adds four seconds and a wrong answer removes five seconds.
 - Each round has one correct track and three validated decoys.
 - Options are shuffled before display.
 - The player selects an option from 1 through 4.
 - Spotify URLs are displayed after each round.
+- Blitz mode displays a live countdown bar that changes from green to amber to red.
+- The GUI provides optional local sound cues for correct answers, wrong answers, streaks, and final countdown ticks.
+- Sound feedback can be muted during gameplay.
+- A correct-answer streak increases the score multiplier and is reported as an achievement at the end of the session.
+- The 50/50 power-up removes two incorrect choices once per session.
+- Blitz mode provides a one-use five-second time boost.
+- Results display earned achievements such as three-answer streaks, five-answer streaks, and perfect runs.
 - If fewer than one valid round exists, the game exits with an informative message.
 
 ## 9. Scoring

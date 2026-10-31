@@ -1,5 +1,8 @@
 import sys
 import logging
+import math
+import random
+import struct
 from pathlib import Path
 from threading import Event
 
@@ -19,8 +22,21 @@ from spotify_service import (
     list_spotify_sources,
     load_and_categorize_songs,
 )
-from PySide6.QtCore import QElapsedTimer, QObject, QThread, QTimer, Qt, QUrl, Signal, Slot
+from PySide6.QtCore import (
+    QByteArray,
+    QBuffer,
+    QElapsedTimer,
+    QIODevice,
+    QObject,
+    QThread,
+    QTimer,
+    Qt,
+    QUrl,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
+from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
@@ -41,6 +57,88 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+class SoundEffects(QObject):
+    """Small synthesized UI sounds that require no external audio files."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.enabled = True
+        self._active = []
+
+    def toggle(self):
+        self.enabled = not self.enabled
+        return self.enabled
+
+    def play_correct(self):
+        # Bright ascending C-major arpeggio.
+        self._play_sequence([(1047, 75), (1319, 75), (1568, 120)])
+
+    def play_wrong(self):
+        # Gentle descending cue instead of a harsh buzzer.
+        self._play_sequence([(330, 110), (247, 160)], volume=0.18)
+
+    def play_tick(self):
+        self._play_sequence([(900, 45)], volume=0.16)
+
+    def play_streak(self):
+        # Longer celebratory C-major fanfare for a five-answer streak.
+        self._play_sequence(
+            [(523, 80), (659, 80), (784, 80), (1047, 100), (1319, 220)],
+            volume=0.28,
+        )
+
+    def _play_sequence(self, notes, volume=0.24):
+        if not self.enabled:
+            return
+        sample_rate = 44_100
+        raw = bytearray()
+        for frequency, duration_ms in notes:
+            sample_count = int(sample_rate * duration_ms / 1000)
+            for index in range(sample_count):
+                envelope = min(1.0, index / 220) * min(1.0, (sample_count - index) / 500)
+                value = int(
+                    32767
+                    * volume
+                    * envelope
+                    * math.sin(2 * math.pi * frequency * index / sample_rate)
+                )
+                raw.extend(struct.pack("<h", value))
+            raw.extend(b"\x00\x00" * int(sample_rate * 0.025))
+
+        try:
+            output_device = QMediaDevices.defaultAudioOutput()
+            if output_device.isNull():
+                logging.warning("No default audio output device is available")
+                return
+            audio_format = QAudioFormat()
+            audio_format.setSampleRate(sample_rate)
+            audio_format.setChannelCount(1)
+            audio_format.setSampleFormat(QAudioFormat.SampleFormat.Int16)
+            if not output_device.isFormatSupported(audio_format):
+                audio_format = output_device.preferredFormat()
+            sink = QAudioSink(output_device, audio_format, self)
+            sink.setVolume(1.0)
+            buffer = QBuffer(self)
+            buffer.setData(QByteArray(bytes(raw)))
+            buffer.open(QIODevice.OpenModeFlag.ReadOnly)
+            sink.start(buffer)
+            self._active.append((sink, buffer))
+            duration_ms = int(len(raw) / 2 / sample_rate * 1000) + 300
+            QTimer.singleShot(duration_ms, lambda: self._cleanup(sink, buffer))
+            logging.debug("Played sound effect; audio state=%s", sink.state())
+        except Exception:
+            # Audio is optional; an unavailable output device must not break gameplay.
+            logging.debug("Audio feedback is unavailable", exc_info=True)
+
+    def _cleanup(self, sink, buffer):
+        sink.stop()
+        buffer.close()
+        try:
+            self._active.remove((sink, buffer))
+        except ValueError:
+            pass
 
 
 class LibraryLoader(QObject):
@@ -183,7 +281,7 @@ class SourceSetupWidget(QWidget):
 
 
 class SetupWidget(QWidget):
-    start_game = Signal(object, str, str)
+    start_game = Signal(object, str, str, str)
     change_source = Signal()
 
     def __init__(self, english_songs, hebrew_songs):
@@ -202,6 +300,9 @@ class SetupWidget(QWidget):
         self.difficulty_combo = QComboBox()
         self.difficulty_combo.addItem("Easy - signature words", "easy")
         self.difficulty_combo.addItem("Hard - deeper cuts", "hard")
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("Classic - 5 rounds", "classic")
+        self.mode_combo.addItem("Blitz - 60 seconds", "blitz")
 
         start_button = QPushButton("Start Game")
         start_button.setObjectName("primaryButton")
@@ -219,6 +320,8 @@ class SetupWidget(QWidget):
         card_layout.addWidget(self.language_combo)
         card_layout.addWidget(QLabel("Difficulty"))
         card_layout.addWidget(self.difficulty_combo)
+        card_layout.addWidget(QLabel("Game mode"))
+        card_layout.addWidget(self.mode_combo)
         card_layout.addSpacing(12)
         card_layout.addWidget(start_button)
         card_layout.addWidget(change_source_button)
@@ -233,20 +336,30 @@ class SetupWidget(QWidget):
     def start(self):
         language = self.language_combo.currentData()
         difficulty = self.difficulty_combo.currentData()
+        mode = self.mode_combo.currentData()
         songs = self.hebrew_songs if language == "Hebrew" else self.english_songs
-        self.start_game.emit(songs, language, difficulty)
+        self.start_game.emit(songs, language, difficulty, mode)
 
 
 class GameWidget(QWidget):
     finished = Signal(object)
     change_source = Signal()
 
-    def __init__(self, songs, language, difficulty):
+    def __init__(self, songs, language, difficulty, mode="classic"):
         super().__init__()
         self.language = language
         self.difficulty = difficulty
+        self.mode = mode
+        self.blitz_total_ms = 60_000
+        self.blitz_remaining_ms = self.blitz_total_ms
+        self.blitz_bonus_ms = 0
+        self.session_finished = False
+        self.sounds = SoundEffects(self)
+        self.last_tick_second = None
         self.setLayoutDirection(Qt.RightToLeft if language == "Hebrew" else Qt.LeftToRight)
-        self.rounds = prepare_game_rounds(songs, difficulty)
+        self.rounds = prepare_game_rounds(
+            songs, difficulty, max_rounds=50 if mode == "blitz" else 5
+        )
         if not self.rounds:
             raise ValueError(f"No suitable rounds found for the {language} song pool.")
 
@@ -256,6 +369,10 @@ class GameWidget(QWidget):
         self.streak = 0
         self.best_streak = 0
         self.correct_answers = 0
+        self.answered_rounds = 0
+        self.answered_current_round = False
+        self.used_fifty_fifty = False
+        self.used_time_boost = False
         self.options = []
         self.correct_option = 0
         self.answer_buttons = []
@@ -263,6 +380,8 @@ class GameWidget(QWidget):
         self.elapsed_timer = QElapsedTimer()
         self.clock_timer = QTimer(self)
         self.clock_timer.timeout.connect(self.update_clock)
+        self.blitz_timer = QTimer(self)
+        self.blitz_timer.timeout.connect(self.update_blitz_clock)
         self.network_manager = QNetworkAccessManager(self)
         self.active_art_reply = None
 
@@ -270,6 +389,21 @@ class GameWidget(QWidget):
         self.score_label = QLabel()
         self.streak_label = QLabel()
         self.timer_label = QLabel()
+        self.sound_button = QPushButton("🔊 Sound On")
+        self.sound_button.setObjectName("linkButton")
+        self.sound_button.clicked.connect(self.toggle_sound)
+        self.fifty_button = QPushButton("50/50")
+        self.fifty_button.setObjectName("linkButton")
+        self.fifty_button.clicked.connect(self.use_fifty_fifty)
+        self.time_boost_button = QPushButton("+5 Seconds")
+        self.time_boost_button.setObjectName("linkButton")
+        self.time_boost_button.setVisible(mode == "blitz")
+        self.time_boost_button.clicked.connect(self.use_time_boost)
+        self.time_bar = QProgressBar()
+        self.time_bar.setRange(0, self.blitz_total_ms)
+        self.time_bar.setValue(self.blitz_total_ms)
+        self.time_bar.setTextVisible(False)
+        self.time_bar.setVisible(mode == "blitz")
         self.word_label = QLabel()
         self.word_label.setObjectName("signatureWord")
         self.clue_label = QLabel()
@@ -298,6 +432,7 @@ class GameWidget(QWidget):
         stats.addWidget(self.score_label)
         stats.addWidget(self.streak_label)
         stats.addWidget(self.timer_label)
+        stats.addWidget(self.sound_button)
 
         clue_panel = QFrame()
         clue_panel.setObjectName("cluePanel")
@@ -327,6 +462,11 @@ class GameWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(32, 24, 32, 24)
         layout.addLayout(stats)
+        layout.addWidget(self.time_bar)
+        powerups = QHBoxLayout()
+        powerups.addWidget(self.fifty_button)
+        powerups.addWidget(self.time_boost_button)
+        layout.addLayout(powerups)
         layout.addWidget(clue_panel)
         layout.addWidget(self.album_art_label, alignment=Qt.AlignCenter)
         layout.addLayout(answers)
@@ -351,6 +491,7 @@ class GameWidget(QWidget):
         self.album_art_label.setVisible(False)
         self.result_label.clear()
         self.next_button.setVisible(False)
+        self.answered_current_round = False
 
         for button, option in zip(self.answer_buttons, self.options):
             button.setText(f"{option.track_name} — {option.artist}")
@@ -362,17 +503,60 @@ class GameWidget(QWidget):
             link_button.setVisible(False)
 
         self.elapsed_timer.start()
-        self.clock_timer.start(100)
+        if self.mode == "blitz":
+            if self.round_number == 0:
+                self.blitz_session_timer = QElapsedTimer()
+                self.blitz_session_timer.start()
+                self.last_tick_second = None
+            self.blitz_timer.start(100)
+            self.update_blitz_clock()
+        else:
+            self.clock_timer.start(100)
         self.update_clock()
 
     @Slot()
     def update_clock(self):
+        if self.mode == "blitz":
+            return
         self.timer_label.setText(f"{self.elapsed_timer.elapsed() / 1000:.1f}s")
+
+    @Slot()
+    def update_blitz_clock(self):
+        if self.session_finished:
+            return
+        self.blitz_remaining_ms = max(
+            0,
+            self.blitz_total_ms
+            + self.blitz_bonus_ms
+            - self.blitz_session_timer.elapsed(),
+        )
+        self.time_bar.setValue(self.blitz_remaining_ms)
+        self.timer_label.setText(f"TIME {self.blitz_remaining_ms / 1000:.1f}s")
+        color = "#1db954" if self.blitz_remaining_ms > 30_000 else "#ffb703"
+        if self.blitz_remaining_ms <= 15_000:
+            color = "#e22134"
+        self.time_bar.setStyleSheet(
+            f"QProgressBar::chunk {{ background: {color}; border-radius: 5px; }}"
+        )
+        if self.blitz_remaining_ms == 0:
+            self.finish_game("Time's up!")
+        elif self.blitz_remaining_ms <= 7_000:
+            remaining_second = math.ceil(self.blitz_remaining_ms / 1000)
+            if remaining_second != self.last_tick_second:
+                self.last_tick_second = remaining_second
+                self.sounds.play_tick()
 
     @Slot(int)
     def answer(self, selected_index):
+        if self.session_finished or self.answered_current_round:
+            return
+        if not self.answer_buttons[selected_index].isEnabled():
+            return
+        self.answered_current_round = True
+        self.answered_rounds += 1
         elapsed = self.elapsed_timer.elapsed() / 1000
-        self.clock_timer.stop()
+        if self.mode != "blitz":
+            self.clock_timer.stop()
         for button in self.answer_buttons:
             button.setEnabled(False)
 
@@ -382,12 +566,18 @@ class GameWidget(QWidget):
             self.correct_answers += 1
             self.best_streak = max(self.best_streak, self.streak)
             points = calculate_round_score(True, elapsed, self.streak)
+            if self.mode == "blitz":
+                self.blitz_bonus_ms += 4_000
             self.score += points
+            self.sounds.play_streak() if self.streak >= 5 else self.sounds.play_correct()
             self.answer_buttons[selected_index].setProperty("state", "correct")
             self.result_label.setText(f"Correct!  +{points} points")
         else:
             self.streak = 0
+            if self.mode == "blitz":
+                self.blitz_bonus_ms -= 5_000
             self.answer_buttons[selected_index].setProperty("state", "wrong")
+            self.sounds.play_wrong()
             self.answer_buttons[self.correct_option - 1].setProperty("state", "correct")
             correct = self.options[self.correct_option - 1]
             self.result_label.setText(f"The answer was {correct.track_name} — {correct.artist}")
@@ -406,6 +596,45 @@ class GameWidget(QWidget):
         self.load_album_art(self.options[self.correct_option - 1].album_art_url)
         self.next_button.setText("Finish Game" if self.round_number + 1 == len(self.rounds) else "Next Round")
         self.next_button.setVisible(True)
+
+    @Slot()
+    def use_fifty_fifty(self):
+        if self.used_fifty_fifty or self.answered_current_round:
+            return
+        self.used_fifty_fifty = True
+        self.fifty_button.setEnabled(False)
+        wrong_indices = [
+            index for index in range(4) if index != self.correct_option - 1
+        ]
+        for index in random.sample(wrong_indices, 2):
+            self.answer_buttons[index].setEnabled(False)
+            self.answer_buttons[index].setText("— eliminated —")
+
+    @Slot()
+    def use_time_boost(self):
+        if self.mode != "blitz" or self.used_time_boost or self.session_finished:
+            return
+        self.used_time_boost = True
+        self.time_boost_button.setEnabled(False)
+        self.blitz_bonus_ms += 5_000
+        self.update_blitz_clock()
+
+    def achievements(self):
+        earned = []
+        if self.correct_answers:
+            earned.append("First correct answer")
+        if self.best_streak >= 3:
+            earned.append("Three-answer streak")
+        if self.best_streak >= 5:
+            earned.append("Five-answer streak")
+        if self.answered_rounds and self.correct_answers == self.answered_rounds:
+            earned.append("Perfect run")
+        return earned
+
+    @Slot()
+    def toggle_sound(self):
+        enabled = self.sounds.toggle()
+        self.sound_button.setText("🔊 Sound On" if enabled else "🔇 Sound Off")
 
     @Slot()
     def open_spotify_link(self):
@@ -435,18 +664,34 @@ class GameWidget(QWidget):
 
     @Slot()
     def next_round(self):
+        if self.session_finished:
+            return
         if self.round_number + 1 == len(self.rounds):
-            self.finished.emit({
-                'score': self.score,
-                'correct_answers': self.correct_answers,
-                'total_rounds': len(self.rounds),
-                'best_streak': self.best_streak,
-                'language': self.language,
-                'difficulty': self.difficulty,
-            })
+            self.finish_game()
             return
         self.round_number += 1
         self.show_round()
+
+    def finish_game(self, message=None):
+        if self.session_finished:
+            return
+        self.session_finished = True
+        self.clock_timer.stop()
+        self.blitz_timer.stop()
+        for button in self.answer_buttons:
+            button.setEnabled(False)
+        if message:
+            self.result_label.setText(message)
+        self.finished.emit({
+            'score': self.score,
+            'correct_answers': self.correct_answers,
+            'total_rounds': max(1, self.answered_rounds),
+            'best_streak': self.best_streak,
+            'language': self.language,
+            'difficulty': self.difficulty,
+            'mode': self.mode,
+            'achievements': self.achievements(),
+        })
 
 
 class ResultsWidget(QWidget):
@@ -464,6 +709,15 @@ class ResultsWidget(QWidget):
             f"Accuracy: {accuracy:.0f}%\nBest streak: {result['best_streak']}"
         )
         summary.setObjectName("mutedText")
+        achievements = result.get("achievements", [])
+        achievement_text = (
+            "ACHIEVEMENTS\n" + "\n".join(f"🏆 {item}" for item in achievements)
+            if achievements
+            else "ACHIEVEMENTS\nNo achievements yet"
+        )
+        achievement_label = QLabel(achievement_text)
+        achievement_label.setObjectName("mutedText")
+        achievement_label.setAlignment(Qt.AlignCenter)
         leaderboard_text = "TOP SCORES\n"
         if scores:
             leaderboard_text += "\n".join(
@@ -489,6 +743,7 @@ class ResultsWidget(QWidget):
         layout.addWidget(QLabel("FINAL SCORE"), alignment=Qt.AlignCenter)
         layout.addWidget(score, alignment=Qt.AlignCenter)
         layout.addWidget(summary, alignment=Qt.AlignCenter)
+        layout.addWidget(achievement_label, alignment=Qt.AlignCenter)
         layout.addWidget(leaderboard, alignment=Qt.AlignCenter)
         layout.addSpacing(20)
         layout.addWidget(replay)
@@ -656,10 +911,10 @@ class MainWindow(QMainWindow):
         setup.load_source.connect(self.load_selected_source)
         self.setCentralWidget(setup)
 
-    @Slot(object, str, str)
-    def start_game(self, songs, language, difficulty):
+    @Slot(object, str, str, str)
+    def start_game(self, songs, language, difficulty, mode):
         try:
-            game = GameWidget(songs, language, difficulty)
+            game = GameWidget(songs, language, difficulty, mode)
         except ValueError as error:
             QMessageBox.warning(self, "Unable to Start", str(error))
             return
