@@ -74,7 +74,7 @@ requirements.txt      Python dependencies
 .env.example          Required environment variable template
 ```
 
-Generated and private files such as `.venv/`, `.cache`, `.lyrics_cache.json`, `.env`, and `*.xlsx` are excluded from Git.
+The application uses typed `Song` objects rather than pandas DataFrames. Generated and private files such as `.venv/`, `.cache`, `.lyrics_cache.json`, `.env`, and `*.xlsx` are excluded from Git.
 
 ## Versioning
 

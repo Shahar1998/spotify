@@ -163,7 +163,7 @@ class GameWidget(QWidget):
         self.next_button.setVisible(False)
 
         for button, option in zip(self.answer_buttons, self.options):
-            button.setText(f"{option['Track Name']} — {option['Artist']}")
+            button.setText(f"{option.track_name} — {option.artist}")
             button.setEnabled(True)
 
         for link_button in self.link_buttons:
@@ -193,21 +193,21 @@ class GameWidget(QWidget):
             self.streak = 0
             correct = self.options[self.correct_option - 1]
             self.result_label.setText(
-                f"Incorrect. Correct answer: {correct['Track Name']} — {correct['Artist']}"
+                f"Incorrect. Correct answer: {correct.track_name} — {correct.artist}"
             )
 
         self.score_label.setText(f"Score: {self.score}    Streak: {self.streak}")
         for link_button, option in zip(self.link_buttons, self.options):
-            link_button.setText(f"Open {option['Track Name']} in Spotify")
+            link_button.setText(f"Open {option.track_name} in Spotify")
             try:
                 link_button.clicked.disconnect()
             except TypeError:
                 pass
             link_button.clicked.connect(
-                lambda checked=False, url=option['Spotify URL']:
+                lambda checked=False, url=option.spotify_url:
                 QDesktopServices.openUrl(QUrl(url))
             )
-            link_button.setVisible(bool(option['Spotify URL']))
+            link_button.setVisible(bool(option.spotify_url))
         self.next_button.setText(
             "Finish Game" if self.round_number + 1 == len(self.rounds) else "Next Round"
         )

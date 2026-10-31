@@ -1,7 +1,6 @@
 import json
 
 import pytest
-import pandas as pd
 from models import Song
 from lyrics_client import fetch_lrclib_lyrics
 
@@ -64,42 +63,35 @@ def test_calculate_round_score_returns_zero_for_incorrect_answers():
 
 
 def test_get_decoy_indices_guarantees_whole_word_exclusion():
-    songs = pd.DataFrame(
-        {
-            "Lyrics": ["art art", "party", "music", "artificial", "dancing"]
-        },
-        index=[10, 20, 30, 40, 50],
-    )
+    songs = [
+        Song("Track 1", "Artist", "", "art art", True),
+        Song("Track 2", "Artist", "", "party", True),
+        Song("Track 3", "Artist", "", "music", True),
+        Song("Track 4", "Artist", "", "artificial", True),
+        Song("Track 5", "Artist", "", "dancing", True),
+    ]
 
-    assert get_decoy_indices(songs, "art") == [20, 30, 40, 50]
+    assert get_decoy_indices(songs, "art") == [1, 2, 3, 4]
 
 
 def test_tracks_without_real_lyrics_remain_safe_decoys():
-    songs = pd.DataFrame(
-        {
-            "Lyrics": ["art art", "fallback title", "party", "music"],
-            "Has Real Lyrics": [True, False, True, True],
-        },
-        index=[10, 20, 30, 40],
-    )
+    songs = [
+        Song("Track 1", "Artist", "", "art art", True),
+        Song("Track 2", "Artist", "", "fallback title", False),
+        Song("Track 3", "Artist", "", "party", True),
+        Song("Track 4", "Artist", "", "music", True),
+    ]
 
-    assert get_decoy_indices(songs, "art") == [20, 30, 40]
+    assert get_decoy_indices(songs, "art") == [1, 2, 3]
 
 
 def test_prepare_game_rounds_and_options_are_playable():
-    songs = pd.DataFrame(
-        {
-            "Track Name": ["Track One", "Track Two", "Track Three", "Track Four"],
-            "Artist": ["Artist A", "Artist B", "Artist C", "Artist D"],
-            "Lyrics": [
-                "summer summer summer in the night",
-                "ocean ocean ocean in the night",
-                "mountain mountain mountain in the night",
-                "forest forest forest in the night",
-            ],
-            "Has Real Lyrics": [True, True, True, True],
-        }
-    )
+    songs = [
+        Song("Track One", "Artist A", "", "summer summer summer in the night", True),
+        Song("Track Two", "Artist B", "", "ocean ocean ocean in the night", True),
+        Song("Track Three", "Artist C", "", "mountain mountain mountain in the night", True),
+        Song("Track Four", "Artist D", "", "forest forest forest in the night", True),
+    ]
 
     rounds = prepare_game_rounds(songs, "easy", max_rounds=5)
     options, correct_option = build_round_options(songs, rounds[0])

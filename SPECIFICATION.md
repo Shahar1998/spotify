@@ -12,7 +12,7 @@ Current release: `0.1.0` (development release).
 - `spotipy` for Spotify OAuth and saved-track access
 - `requests` for HTTP communication
 - `python-dotenv` for local configuration
-- `pandas` for song data and filtering
+- Dataclasses for typed song data and filtering
 - `pytest` for automated tests
 - `PySide6` for the desktop GUI
 - LRCLIB for plain lyric retrieval
@@ -47,7 +47,7 @@ Spotify authentication is created by `create_spotify_client()` when the applicat
 4. Remove common feature and remix tags before querying LRCLIB.
 5. Classify a track as Hebrew when its track name or primary artist contains Hebrew Unicode characters. All other tracks are placed in the English pool.
 
-The loader first reads the total library size, samples random Spotify pages, deduplicates tracks, and then randomly selects up to the requested sample size. This avoids fetching every saved track solely to create a sample.
+The loader first reads the total library size, samples random Spotify pages, deduplicates tracks, and then randomly selects up to the requested sample size. This avoids fetching every saved track solely to create a sample. Songs are represented as typed `Song` dataclasses throughout the application.
 
 ## 5. Lyric retrieval
 
