@@ -128,6 +128,7 @@ class SourceSetupWidget(QWidget):
 
 class SetupWidget(QWidget):
     start_game = Signal(object, str, str)
+    change_source = Signal()
 
     def __init__(self, english_songs, hebrew_songs):
         super().__init__()
@@ -149,6 +150,8 @@ class SetupWidget(QWidget):
         start_button = QPushButton("Start Game")
         start_button.setObjectName("primaryButton")
         start_button.clicked.connect(self.start)
+        change_source_button = QPushButton("Change Library / Playlist")
+        change_source_button.clicked.connect(self.change_source)
 
         card = QFrame()
         card.setObjectName("panel")
@@ -162,6 +165,7 @@ class SetupWidget(QWidget):
         card_layout.addWidget(self.difficulty_combo)
         card_layout.addSpacing(12)
         card_layout.addWidget(start_button)
+        card_layout.addWidget(change_source_button)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(48, 40, 48, 40)
@@ -179,6 +183,7 @@ class SetupWidget(QWidget):
 
 class GameWidget(QWidget):
     finished = Signal(object)
+    change_source = Signal()
 
     def __init__(self, songs, language, difficulty):
         super().__init__()
@@ -225,6 +230,9 @@ class GameWidget(QWidget):
         self.next_button.setObjectName("primaryButton")
         self.next_button.clicked.connect(self.next_round)
         self.next_button.setVisible(False)
+        self.change_source_button = QPushButton("Change Library / Playlist")
+        self.change_source_button.setObjectName("linkButton")
+        self.change_source_button.clicked.connect(self.change_source)
 
         stats = QHBoxLayout()
         stats.addWidget(self.round_label)
@@ -267,6 +275,7 @@ class GameWidget(QWidget):
         layout.addLayout(links)
         layout.addWidget(self.result_label)
         layout.addWidget(self.next_button)
+        layout.addWidget(self.change_source_button)
         self.show_round()
 
     def show_round(self):
@@ -382,6 +391,7 @@ class GameWidget(QWidget):
 
 class ResultsWidget(QWidget):
     play_again = Signal()
+    change_source = Signal()
 
     def __init__(self, result):
         super().__init__()
@@ -397,6 +407,9 @@ class ResultsWidget(QWidget):
         replay = QPushButton("Play Again")
         replay.setObjectName("primaryButton")
         replay.clicked.connect(self.play_again)
+        change_source = QPushButton("Change Library / Playlist")
+        change_source.setObjectName("linkButton")
+        change_source.clicked.connect(self.change_source)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(48, 48, 48, 48)
@@ -407,6 +420,7 @@ class ResultsWidget(QWidget):
         layout.addWidget(summary, alignment=Qt.AlignCenter)
         layout.addSpacing(20)
         layout.addWidget(replay)
+        layout.addWidget(change_source)
         layout.addStretch()
 
 
@@ -419,6 +433,7 @@ class MainWindow(QMainWindow):
         self.source_loader = None
         self.english_songs = None
         self.hebrew_songs = None
+        self.sources = []
         self.setWindowTitle(f"SpotiWord v{__version__}")
         self.setMinimumSize(760, 700)
 
@@ -488,6 +503,7 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def sources_loaded(self, sources):
+        self.sources = sources
         self.start_button.setEnabled(True)
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
@@ -542,6 +558,7 @@ class MainWindow(QMainWindow):
     def show_setup(self):
         setup = SetupWidget(self.english_songs, self.hebrew_songs)
         setup.start_game.connect(self.start_game)
+        setup.change_source.connect(lambda: self.show_source_setup(self.sources))
         self.setCentralWidget(setup)
 
     def show_source_setup(self, sources):
@@ -557,13 +574,27 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Unable to Start", str(error))
             return
         game.finished.connect(self.show_results)
+        game.change_source.connect(self.confirm_change_source)
         self.setCentralWidget(game)
 
     @Slot(object)
     def show_results(self, result):
         results = ResultsWidget(result)
         results.play_again.connect(self.show_setup)
+        results.change_source.connect(lambda: self.show_source_setup(self.sources))
         self.setCentralWidget(results)
+
+    @Slot()
+    def confirm_change_source(self):
+        answer = QMessageBox.question(
+            self,
+            "Change Library?",
+            "Your current game will be discarded. Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer == QMessageBox.Yes:
+            self.show_source_setup(self.sources)
 
 
 def main():
