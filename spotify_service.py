@@ -84,7 +84,6 @@ def _build_song_entry(item, lyrics_cache=None):
         lyrics=lyrics if has_real_lyrics else f'{original_name} {artist_name}',
         has_real_lyrics=has_real_lyrics,
         album_art_url=album_images[0].get('url') if album_images else None,
-        preview_url=track.get('preview_url'),
     ), is_hebrew(original_name) or is_hebrew(artist_name)
 
 

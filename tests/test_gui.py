@@ -20,7 +20,7 @@ def qt_app():
 @pytest.fixture
 def songs():
     return [
-        Song("Track One", "Artist A", "", "summer summer summer in the night", True, preview_url="https://example.com/preview.mp3"),
+        Song("Track One", "Artist A", "", "summer summer summer in the night", True),
         Song("Track Two", "Artist B", "", "ocean ocean ocean in the night", True),
         Song("Track Three", "Artist C", "", "mountain mountain mountain in the night", True),
         Song("Track Four", "Artist D", "", "forest forest forest in the night", True),

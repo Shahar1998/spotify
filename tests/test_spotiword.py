@@ -187,14 +187,12 @@ def test_song_model_preserves_game_metadata():
         lyrics="Example lyrics",
         has_real_lyrics=True,
         album_art_url="https://images.example/art.jpg",
-        preview_url="https://images.example/preview.mp3",
     )
 
     record = song.to_record()
 
     assert record["Track Name"] == "Example"
     assert record["Album Art URL"].endswith("art.jpg")
-    assert record["Preview URL"].endswith("preview.mp3")
 
 
 def test_spotify_sources_include_liked_songs_and_playlists():

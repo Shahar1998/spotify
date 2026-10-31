@@ -12,7 +12,6 @@ class Song:
     lyrics: str
     has_real_lyrics: bool
     album_art_url: Optional[str] = None
-    preview_url: Optional[str] = None
 
     def to_record(self):
         """Return the legacy record shape used by the current DataFrame layer."""
@@ -23,7 +22,6 @@ class Song:
             'Lyrics': self.lyrics,
             'Has Real Lyrics': self.has_real_lyrics,
             'Album Art URL': self.album_art_url or '',
-            'Preview URL': self.preview_url or '',
         }
 
     def as_dict(self):

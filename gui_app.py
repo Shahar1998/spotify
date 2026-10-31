@@ -19,7 +19,6 @@ from spotify_service import (
 from PySide6.QtCore import QElapsedTimer, QObject, QThread, QTimer, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
-from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -209,12 +208,6 @@ class GameWidget(QWidget):
         self.elapsed_timer = QElapsedTimer()
         self.clock_timer = QTimer(self)
         self.clock_timer.timeout.connect(self.update_clock)
-        self.preview_timer = QTimer(self)
-        self.preview_timer.setSingleShot(True)
-        self.preview_timer.timeout.connect(self.stop_preview)
-        self.audio_output = QAudioOutput(self)
-        self.media_player = QMediaPlayer(self)
-        self.media_player.setAudioOutput(self.audio_output)
         self.network_manager = QNetworkAccessManager(self)
         self.active_art_reply = None
 
@@ -240,10 +233,6 @@ class GameWidget(QWidget):
         self.next_button.setObjectName("primaryButton")
         self.next_button.clicked.connect(self.next_round)
         self.next_button.setVisible(False)
-        self.preview_button = QPushButton("Preview Correct Track (5 seconds)")
-        self.preview_button.setObjectName("linkButton")
-        self.preview_button.setEnabled(False)
-        self.preview_button.clicked.connect(self.play_preview)
         self.change_source_button = QPushButton("Change Library / Playlist")
         self.change_source_button.setObjectName("linkButton")
         self.change_source_button.clicked.connect(self.change_source)
@@ -288,7 +277,6 @@ class GameWidget(QWidget):
         layout.addLayout(answers)
         layout.addLayout(links)
         layout.addWidget(self.result_label)
-        layout.addWidget(self.preview_button)
         layout.addWidget(self.next_button)
         layout.addWidget(self.change_source_button)
         self.show_round()
@@ -307,9 +295,6 @@ class GameWidget(QWidget):
         self.album_art_label.clear()
         self.album_art_label.setVisible(False)
         self.result_label.clear()
-        self.preview_button.setEnabled(False)
-        self.preview_button.setText("Preview Correct Track (5 seconds)")
-        self.stop_preview()
         self.next_button.setVisible(False)
 
         for button, option in zip(self.answer_buttons, self.options):
@@ -364,30 +349,8 @@ class GameWidget(QWidget):
             link_button.setVisible(bool(option.spotify_url))
 
         self.load_album_art(self.options[self.correct_option - 1].album_art_url)
-        correct_song = self.options[self.correct_option - 1]
-        self.preview_button.setEnabled(bool(correct_song.preview_url))
-        if not correct_song.preview_url:
-            self.preview_button.setText("No preview available")
         self.next_button.setText("Finish Game" if self.round_number + 1 == len(self.rounds) else "Next Round")
         self.next_button.setVisible(True)
-
-    @Slot()
-    def play_preview(self):
-        correct_song = self.options[self.correct_option - 1]
-        if not correct_song.preview_url:
-            return
-        self.media_player.setSource(QUrl(correct_song.preview_url))
-        self.media_player.play()
-        self.preview_timer.start(5000)
-        self.preview_button.setText("Playing preview...")
-
-    @Slot()
-    def stop_preview(self):
-        self.media_player.stop()
-        self.preview_timer.stop()
-        if self.options and self.correct_option:
-            if self.options[self.correct_option - 1].preview_url:
-                self.preview_button.setText("Preview Correct Track (5 seconds)")
 
     @Slot()
     def open_spotify_link(self):
