@@ -5,7 +5,7 @@ from collections import Counter
 from models import Song
 
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 STOP_WORDS = {
     'the', 'a', 'an', 'and', 'in', 'on', 'at', 'to', 'for', 'of', 'with',
