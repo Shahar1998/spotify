@@ -2,6 +2,7 @@ import pytest
 
 from SpotiWord import (
     clean_track_name,
+    calculate_round_score,
     create_spotify_client,
     get_lyric_snippet_clue,
     is_hebrew,
@@ -42,3 +43,13 @@ def test_create_spotify_client_reports_missing_configuration(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Missing Spotify configuration"):
         create_spotify_client()
+
+
+def test_calculate_round_score_applies_base_speed_and_streak():
+    assert calculate_round_score(True, elapsed_time=8, streak=1) == 10
+    assert calculate_round_score(True, elapsed_time=7, streak=1) == 25
+    assert calculate_round_score(True, elapsed_time=3, streak=2) == 50
+
+
+def test_calculate_round_score_returns_zero_for_incorrect_answers():
+    assert calculate_round_score(False, elapsed_time=2, streak=4) == 0

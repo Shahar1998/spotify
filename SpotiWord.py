@@ -52,6 +52,16 @@ def tokenize_words(text):
     return re.findall(r"[^\W\d_]+(?:['’][^\W\d_]+)*", text.lower(), re.UNICODE)
 
 
+def calculate_round_score(is_correct, elapsed_time, streak):
+    """Calculate round points using the specification's scoring rules."""
+    if not is_correct:
+        return 0
+
+    base_points = 10
+    speed_bonus = 15 if elapsed_time <= 7 else 0
+    return (base_points + speed_bonus) * streak
+
+
 def fetch_lrclib_lyrics(track_name, artist_name):
     """Fetches plain lyrics from LRCLIB API without requiring an API key."""
     url = "https://lrclib.net/api/get"
@@ -230,7 +240,7 @@ def start_lyric_game(df, language_name, difficulty_level):
         for i, opt in enumerate(options, 1):
             print(f"  [{i}] {opt['Track Name']} — {opt['Artist']}")
 
-        start_time = time.time()
+        start_time = time.monotonic()
         
         while True:
             try:
@@ -241,12 +251,11 @@ def start_lyric_game(df, language_name, difficulty_level):
                 pass
             print("Please enter a valid number between 1 and 4.")
 
-        elapsed_time = time.time() - start_time
+        elapsed_time = time.monotonic() - start_time
 
         if guess == correct_option_num:
             streak += 1
-            points = 15 if elapsed_time <= 7 else 10
-            points_gained = points * streak
+            points_gained = calculate_round_score(True, elapsed_time, streak)
             score += points_gained
             print(f"🎉 Correct! (+{points_gained} pts) Answered in {round(elapsed_time, 1)}s!")
         else:
