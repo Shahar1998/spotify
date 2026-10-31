@@ -7,17 +7,17 @@ from core import (
     calculate_round_score,
     prepare_game_rounds,
 )
-from spotify_service import (
-    create_spotify_client,
-    LoadingCancelled,
-    load_and_categorize_songs,
-)
-from PySide6.QtCore import QElapsedTimer, QObject, QThread, QTimer, QUrl, Signal, Slot
+from models import Song
+from spotify_service import LoadingCancelled, create_spotify_client, load_and_categorize_songs
+from PySide6.QtCore import QElapsedTimer, QObject, QThread, QTimer, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -47,14 +47,14 @@ class LibraryLoader(QObject):
     @Slot()
     def run(self):
         try:
-            spotify_client = create_spotify_client()
-            english_songs, hebrew_songs = load_and_categorize_songs(
-                spotify_client,
+            client = create_spotify_client()
+            result = load_and_categorize_songs(
+                client,
                 max_songs=self.max_songs,
                 progress_callback=self.progress.emit,
                 cancel_callback=self.cancel_requested.is_set,
             )
-            self.finished.emit(english_songs, hebrew_songs)
+            self.finished.emit(*result)
         except LoadingCancelled:
             self.cancelled.emit()
         except Exception as error:
@@ -69,23 +69,40 @@ class SetupWidget(QWidget):
         self.english_songs = english_songs
         self.hebrew_songs = hebrew_songs
 
+        title = QLabel("Ready for your next round?")
+        title.setObjectName("pageTitle")
+        subtitle = QLabel("Choose a language and difficulty to begin.")
+        subtitle.setObjectName("mutedText")
+
         self.language_combo = QComboBox()
         self.language_combo.addItem("English Songs", "English")
         self.language_combo.addItem("Hebrew Songs", "Hebrew")
-
         self.difficulty_combo = QComboBox()
-        self.difficulty_combo.addItem("Easy", "easy")
-        self.difficulty_combo.addItem("Hard", "hard")
+        self.difficulty_combo.addItem("Easy - signature words", "easy")
+        self.difficulty_combo.addItem("Hard - deeper cuts", "hard")
 
         start_button = QPushButton("Start Game")
+        start_button.setObjectName("primaryButton")
         start_button.clicked.connect(self.start)
 
+        card = QFrame()
+        card.setObjectName("panel")
+        card_layout = QVBoxLayout(card)
+        card_layout.addWidget(title)
+        card_layout.addWidget(subtitle)
+        card_layout.addSpacing(16)
+        card_layout.addWidget(QLabel("Language"))
+        card_layout.addWidget(self.language_combo)
+        card_layout.addWidget(QLabel("Difficulty"))
+        card_layout.addWidget(self.difficulty_combo)
+        card_layout.addSpacing(12)
+        card_layout.addWidget(start_button)
+
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Choose your game language:"))
-        layout.addWidget(self.language_combo)
-        layout.addWidget(QLabel("Choose difficulty:"))
-        layout.addWidget(self.difficulty_combo)
-        layout.addWidget(start_button)
+        layout.setContentsMargins(48, 40, 48, 40)
+        layout.addStretch()
+        layout.addWidget(card)
+        layout.addStretch()
 
     @Slot()
     def start(self):
@@ -96,10 +113,11 @@ class SetupWidget(QWidget):
 
 
 class GameWidget(QWidget):
-    finished = Signal(int)
+    finished = Signal(object)
 
     def __init__(self, songs, language, difficulty):
         super().__init__()
+        self.setLayoutDirection(Qt.RightToLeft if language == "Hebrew" else Qt.LeftToRight)
         self.rounds = prepare_game_rounds(songs, difficulty)
         if not self.rounds:
             raise ValueError(f"No suitable rounds found for the {language} song pool.")
@@ -108,6 +126,8 @@ class GameWidget(QWidget):
         self.round_number = 0
         self.score = 0
         self.streak = 0
+        self.best_streak = 0
+        self.correct_answers = 0
         self.options = []
         self.correct_option = 0
         self.answer_buttons = []
@@ -115,60 +135,82 @@ class GameWidget(QWidget):
         self.elapsed_timer = QElapsedTimer()
         self.clock_timer = QTimer(self)
         self.clock_timer.timeout.connect(self.update_clock)
+        self.network_manager = QNetworkAccessManager(self)
+        self.active_art_reply = None
 
-        self.progress_label = QLabel()
+        self.round_label = QLabel()
         self.score_label = QLabel()
+        self.streak_label = QLabel()
         self.timer_label = QLabel()
         self.word_label = QLabel()
+        self.word_label.setObjectName("signatureWord")
         self.clue_label = QLabel()
+        self.clue_label.setObjectName("clueText")
         self.clue_label.setWordWrap(True)
+        self.clue_label.setAlignment(Qt.AlignCenter)
         self.album_art_label = QLabel()
-        self.album_art_label.setFixedSize(240, 240)
+        self.album_art_label.setFixedSize(250, 250)
+        self.album_art_label.setAlignment(Qt.AlignCenter)
         self.album_art_label.setScaledContents(True)
         self.album_art_label.setVisible(False)
         self.result_label = QLabel()
+        self.result_label.setObjectName("resultText")
+        self.result_label.setAlignment(Qt.AlignCenter)
         self.next_button = QPushButton("Next Round")
+        self.next_button.setObjectName("primaryButton")
         self.next_button.clicked.connect(self.next_round)
         self.next_button.setVisible(False)
 
-        layout = QVBoxLayout(self)
-        for widget in (
-            self.progress_label,
-            self.score_label,
-            self.timer_label,
-            self.word_label,
-            self.clue_label,
-            self.album_art_label,
-        ):
-            layout.addWidget(widget)
+        stats = QHBoxLayout()
+        stats.addWidget(self.round_label)
+        stats.addStretch()
+        stats.addWidget(self.score_label)
+        stats.addWidget(self.streak_label)
+        stats.addWidget(self.timer_label)
 
+        clue_panel = QFrame()
+        clue_panel.setObjectName("cluePanel")
+        clue_layout = QVBoxLayout(clue_panel)
+        clue_layout.addWidget(self.word_label)
+        clue_layout.addWidget(self.clue_label)
+
+        answers = QGridLayout()
         for number in range(4):
             button = QPushButton()
+            button.setObjectName("answerButton")
+            button.setMinimumHeight(64)
+            button.setProperty("state", "neutral")
             button.clicked.connect(lambda checked=False, n=number: self.answer(n))
             self.answer_buttons.append(button)
-            layout.addWidget(button)
+            answers.addWidget(button, number // 2, number % 2)
 
-        for number in range(4):
+        links = QHBoxLayout()
+        for _ in range(4):
             link_button = QPushButton()
+            link_button.setObjectName("linkButton")
             link_button.setVisible(False)
             self.link_buttons.append(link_button)
-            layout.addWidget(link_button)
+            links.addWidget(link_button)
 
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(32, 24, 32, 24)
+        layout.addLayout(stats)
+        layout.addWidget(clue_panel)
+        layout.addWidget(self.album_art_label, alignment=Qt.AlignCenter)
+        layout.addLayout(answers)
+        layout.addLayout(links)
         layout.addWidget(self.result_label)
         layout.addWidget(self.next_button)
-        self.network_manager = QNetworkAccessManager(self)
-        self.active_art_reply = None
         self.show_round()
 
     def show_round(self):
         round_info = self.rounds[self.round_number]
         self.options, self.correct_option = build_round_options(self.songs, round_info)
-        self.progress_label.setText(
-            f"Round {self.round_number + 1} of {len(self.rounds)}"
-        )
-        self.score_label.setText(f"Score: {self.score}    Streak: {self.streak}")
-        self.word_label.setText(f"Signature word: {round_info['target_word'].upper()}")
-        self.clue_label.setText(round_info["clue"])
+        self.round_label.setText(f"ROUND {self.round_number + 1} / {len(self.rounds)}")
+        self.score_label.setText(f"SCORE {self.score}")
+        self.streak_label.setText(f"STREAK {self.streak}")
+        self.word_label.setText(round_info['target_word'].upper())
+        self.clue_label.setText(round_info['clue'])
         self.album_art_label.clear()
         self.album_art_label.setVisible(False)
         self.result_label.clear()
@@ -177,7 +219,9 @@ class GameWidget(QWidget):
         for button, option in zip(self.answer_buttons, self.options):
             button.setText(f"{option.track_name} — {option.artist}")
             button.setEnabled(True)
-
+            button.setProperty("state", "neutral")
+            button.style().unpolish(button)
+            button.style().polish(button)
         for link_button in self.link_buttons:
             link_button.setVisible(False)
 
@@ -187,45 +231,48 @@ class GameWidget(QWidget):
 
     @Slot()
     def update_clock(self):
-        self.timer_label.setText(f"Time: {self.elapsed_timer.elapsed() / 1000:.1f}s")
+        self.timer_label.setText(f"{self.elapsed_timer.elapsed() / 1000:.1f}s")
 
     @Slot(int)
     def answer(self, selected_index):
-        elapsed_time = self.elapsed_timer.elapsed() / 1000
+        elapsed = self.elapsed_timer.elapsed() / 1000
         self.clock_timer.stop()
         for button in self.answer_buttons:
             button.setEnabled(False)
 
-        if selected_index + 1 == self.correct_option:
+        is_correct = selected_index + 1 == self.correct_option
+        if is_correct:
             self.streak += 1
-            points = calculate_round_score(True, elapsed_time, self.streak)
+            self.correct_answers += 1
+            self.best_streak = max(self.best_streak, self.streak)
+            points = calculate_round_score(True, elapsed, self.streak)
             self.score += points
-            self.result_label.setText(f"Correct! +{points} points")
+            self.answer_buttons[selected_index].setProperty("state", "correct")
+            self.result_label.setText(f"Correct!  +{points} points")
         else:
             self.streak = 0
+            self.answer_buttons[selected_index].setProperty("state", "wrong")
+            self.answer_buttons[self.correct_option - 1].setProperty("state", "correct")
             correct = self.options[self.correct_option - 1]
-            self.result_label.setText(
-                f"Incorrect. Correct answer: {correct.track_name} — {correct.artist}"
-            )
+            self.result_label.setText(f"The answer was {correct.track_name} — {correct.artist}")
 
-        self.score_label.setText(f"Score: {self.score}    Streak: {self.streak}")
+        for button in self.answer_buttons:
+            button.style().unpolish(button)
+            button.style().polish(button)
+        self.score_label.setText(f"SCORE {self.score}")
+        self.streak_label.setText(f"STREAK {self.streak}")
+
         for link_button, option in zip(self.link_buttons, self.options):
-            link_button.setText(f"Open {option.track_name} in Spotify")
+            link_button.setText(f"Open {option.track_name}")
             try:
                 link_button.clicked.disconnect()
             except TypeError:
                 pass
-            link_button.clicked.connect(
-                lambda checked=False, url=option.spotify_url:
-                QDesktopServices.openUrl(QUrl(url))
-            )
+            link_button.clicked.connect(lambda checked=False, url=option.spotify_url: QDesktopServices.openUrl(QUrl(url)))
             link_button.setVisible(bool(option.spotify_url))
 
-        correct_song = self.options[self.correct_option - 1]
-        self.load_album_art(correct_song.album_art_url)
-        self.next_button.setText(
-            "Finish Game" if self.round_number + 1 == len(self.rounds) else "Next Round"
-        )
+        self.load_album_art(self.options[self.correct_option - 1].album_art_url)
+        self.next_button.setText("Finish Game" if self.round_number + 1 == len(self.rounds) else "Next Round")
         self.next_button.setVisible(True)
 
     def load_album_art(self, image_url):
@@ -233,8 +280,7 @@ class GameWidget(QWidget):
             return
         if self.active_art_reply:
             self.active_art_reply.abort()
-        request = QNetworkRequest(QUrl(image_url))
-        self.active_art_reply = self.network_manager.get(request)
+        self.active_art_reply = self.network_manager.get(QNetworkRequest(QUrl(image_url)))
         self.active_art_reply.finished.connect(self.album_art_loaded)
 
     @Slot()
@@ -252,10 +298,45 @@ class GameWidget(QWidget):
     @Slot()
     def next_round(self):
         if self.round_number + 1 == len(self.rounds):
-            self.finished.emit(self.score)
+            self.finished.emit({
+                'score': self.score,
+                'correct_answers': self.correct_answers,
+                'total_rounds': len(self.rounds),
+                'best_streak': self.best_streak,
+            })
             return
         self.round_number += 1
         self.show_round()
+
+
+class ResultsWidget(QWidget):
+    play_again = Signal()
+
+    def __init__(self, result):
+        super().__init__()
+        title = QLabel("GAME COMPLETE")
+        title.setObjectName("pageTitle")
+        score = QLabel(str(result['score']))
+        score.setObjectName("finalScore")
+        accuracy = result['correct_answers'] / result['total_rounds'] * 100
+        summary = QLabel(
+            f"Accuracy: {accuracy:.0f}%\nBest streak: {result['best_streak']}"
+        )
+        summary.setObjectName("mutedText")
+        replay = QPushButton("Play Again")
+        replay.setObjectName("primaryButton")
+        replay.clicked.connect(self.play_again)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(48, 48, 48, 48)
+        layout.addStretch()
+        layout.addWidget(title, alignment=Qt.AlignCenter)
+        layout.addWidget(QLabel("FINAL SCORE"), alignment=Qt.AlignCenter)
+        layout.addWidget(score, alignment=Qt.AlignCenter)
+        layout.addWidget(summary, alignment=Qt.AlignCenter)
+        layout.addSpacing(20)
+        layout.addWidget(replay)
+        layout.addStretch()
 
 
 class MainWindow(QMainWindow):
@@ -265,27 +346,31 @@ class MainWindow(QMainWindow):
         self.loader = None
         self.english_songs = None
         self.hebrew_songs = None
-
         self.setWindowTitle(f"SpotiWord v{__version__}")
-        self.setMinimumSize(600, 420)
+        self.setMinimumSize(760, 700)
 
         self.status_label = QLabel("Ready to load your Spotify library.")
+        self.status_label.setObjectName("mutedText")
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 1)
-        self.progress_bar.setValue(0)
         self.song_count = QSpinBox()
         self.song_count.setRange(20, 200)
         self.song_count.setSingleStep(10)
-        self.song_count.setValue(200)
+        self.song_count.setValue(100)
         self.song_count.setSuffix(" songs")
         self.start_button = QPushButton("Load Random Songs")
+        self.start_button.setObjectName("primaryButton")
         self.start_button.clicked.connect(self.start_loading)
         self.cancel_button = QPushButton("Cancel Loading")
         self.cancel_button.clicked.connect(self.cancel_loading)
         self.cancel_button.setEnabled(False)
 
         layout = QVBoxLayout()
-        layout.addWidget(QLabel(f"SpotiWord v{__version__}"))
+        layout.setContentsMargins(48, 48, 48, 48)
+        brand = QLabel(f"SPOTIWORD  <span class='version'>v{__version__}</span>")
+        brand.setObjectName("brand")
+        layout.addWidget(brand)
+        layout.addSpacing(20)
         layout.addWidget(QLabel("Number of songs to sample:"))
         layout.addWidget(self.song_count)
         layout.addWidget(self.status_label)
@@ -302,7 +387,6 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(True)
         self.status_label.setText("Connecting to Spotify...")
         self.progress_bar.setRange(0, 0)
-
         self.thread = QThread(self)
         self.loader = LibraryLoader(self.song_count.value())
         self.loader.moveToThread(self.thread)
@@ -366,26 +450,41 @@ class MainWindow(QMainWindow):
         except ValueError as error:
             QMessageBox.warning(self, "Unable to Start", str(error))
             return
-        game.finished.connect(self.game_finished)
+        game.finished.connect(self.show_results)
         self.setCentralWidget(game)
 
-    @Slot(int)
-    def game_finished(self, score):
-        QMessageBox.information(self, "Game Over", f"Final score: {score}")
-        self.show_setup()
+    @Slot(object)
+    def show_results(self, result):
+        results = ResultsWidget(result)
+        results.play_again.connect(self.show_setup)
+        self.setCentralWidget(results)
 
 
 def main():
     app = QApplication(sys.argv)
     app.setStyleSheet(
         """
-        QWidget { background: #181818; color: #f2f2f2; font-size: 14px; }
-        QPushButton { background: #1db954; color: #ffffff; border: none; padding: 10px; border-radius: 5px; }
-        QPushButton:hover { background: #1ed760; }
-        QPushButton:disabled { background: #555555; color: #aaaaaa; }
-        QComboBox, QSpinBox { background: #282828; color: #ffffff; padding: 7px; border: 1px solid #555555; }
-        QProgressBar { border: 1px solid #555555; text-align: center; }
-        QProgressBar::chunk { background: #1db954; }
+        QWidget { background: #121212; color: #f5f5f5; font-size: 14px; }
+        QFrame#panel, QFrame#cluePanel { background: #202020; border: 1px solid #333333; border-radius: 16px; }
+        QLabel#brand { color: #1ed760; font-size: 24px; font-weight: 700; }
+        QLabel#pageTitle { font-size: 28px; font-weight: 700; }
+        QLabel#mutedText { color: #a7a7a7; }
+        QLabel#signatureWord { color: #1ed760; font-size: 34px; font-weight: 800; }
+        QLabel#clueText { color: #ffffff; font-size: 18px; padding: 14px; }
+        QLabel#resultText { color: #1ed760; font-size: 17px; font-weight: 700; }
+        QLabel#finalScore { color: #1ed760; font-size: 64px; font-weight: 800; }
+        QPushButton { background: #282828; color: #ffffff; border: 1px solid #444444; padding: 12px; border-radius: 8px; }
+        QPushButton:hover { background: #333333; border-color: #1ed760; }
+        QPushButton#primaryButton { background: #1db954; border: none; font-weight: 700; }
+        QPushButton#primaryButton:hover { background: #1ed760; }
+        QPushButton#answerButton { font-size: 15px; text-align: left; padding: 16px; }
+        QPushButton#answerButton[state="correct"] { background: #1db954; border-color: #1ed760; }
+        QPushButton#answerButton[state="wrong"] { background: #e22134; border-color: #ff5364; }
+        QPushButton#linkButton { color: #b3b3b3; border: none; font-size: 11px; padding: 5px; }
+        QPushButton:disabled { background: #242424; color: #777777; }
+        QComboBox, QSpinBox { background: #282828; color: #ffffff; padding: 10px; border: 1px solid #444444; border-radius: 6px; }
+        QProgressBar { background: #282828; border: none; border-radius: 5px; height: 10px; text-align: center; }
+        QProgressBar::chunk { background: #1db954; border-radius: 5px; }
         """
     )
     window = MainWindow()
