@@ -3,11 +3,11 @@ import random
 import re
 import time
 from collections import Counter
-import requests
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 import dotenv
 import pandas as pd
+from lyrics_client import fetch_lrclib_lyrics
 
 __version__ = "0.1.0"
 
@@ -70,27 +70,6 @@ def get_decoy_indices(df, target_word):
         if target_word not in set(tokenize_words(str(lyrics)))
     ]
 
-
-def fetch_lrclib_lyrics(track_name, artist_name):
-    """Fetches plain lyrics from LRCLIB API without requiring an API key."""
-    url = "https://lrclib.net/api/get"
-    params = {
-        "track_name": track_name,
-        "artist_name": artist_name
-    }
-    headers = {
-        "User-Agent": "LyriQ v2.1 (local script)"
-    }
-    
-    try:
-        response = requests.get(url, params=params, headers=headers, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            return data.get("plainLyrics")
-    except Exception:
-        pass
-    
-    return None
 
 def is_hebrew(text):
     """Detects if a string contains Hebrew characters."""

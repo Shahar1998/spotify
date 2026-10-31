@@ -3,4 +3,5 @@ __pycache__/
 *.pyc
 .env
 .cache
+.lyrics_cache.json
 *.xlsx

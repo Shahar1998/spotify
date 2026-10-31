@@ -1,5 +1,6 @@
 import pytest
 import pandas as pd
+from lyrics_client import fetch_lrclib_lyrics
 
 from SpotiWord import (
     clean_track_name,
@@ -66,3 +67,33 @@ def test_get_decoy_indices_guarantees_whole_word_exclusion():
     )
 
     assert get_decoy_indices(songs, "art") == [20, 30, 40, 50]
+
+
+def test_fetch_lrclib_lyrics_caches_successful_response(tmp_path):
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"plainLyrics": "Cached lyrics"}
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, *args, **kwargs):
+            self.calls += 1
+            return FakeResponse()
+
+    cache_path = tmp_path / "lyrics.json"
+    session = FakeSession()
+
+    first_result = fetch_lrclib_lyrics(
+        "Song", "Artist", session=session, cache_path=cache_path
+    )
+    second_result = fetch_lrclib_lyrics(
+        "Song", "Artist", session=session, cache_path=cache_path
+    )
+
+    assert first_result == "Cached lyrics"
+    assert second_result == "Cached lyrics"
+    assert session.calls == 1
