@@ -1,64 +1,118 @@
-# SpotiWord — Spotify Signature Word Trivia Game
+# SpotiWord Specification
 
-**SpotiWord** is an interactive, terminal-based lyric trivia game that connects directly to a user's Spotify Liked Songs library. It extracts real song lyrics, isolates each track's defining "signature word" (excluding track titles and artist names), and challenges the player to identify which song features that word most prominently, complete with fill-in-the-blank line clues, streak multipliers, and direct playback links.
+## 1. Product overview
 
----
+SpotiWord is an interactive terminal trivia game based on a user's Spotify Liked Songs library. The game retrieves lyrics, identifies a signature word for a song, provides a lyric clue with the word hidden, and asks the player to select the matching song from four options.
 
-## 1. System Architecture & Tech Stack
+Current release: `0.1.0` (development release).
 
-* **Language:** Python 3.8+
-* **Core Libraries:** 
-  * `spotipy` — Spotify Web API wrapper for OAuth 2.0 authentication and library fetching (`user-library-read`).
-  * `requests` — HTTP client for querying the keyless `lrclib.net` lyrics API.
-  * `pandas` — Tabular data manipulation, language categorization, and filtering.
-  * `collections.Counter` — Frequency analysis for signature word extraction.
-  * `re` — Regular expressions for string cleaning, metadata sanitization, and language detection.
-* **External APIs:**
-  * **Spotify Web API:** Fetches saved tracks, artist metadata, and external web URLs.
-  * **LRCLIB API (`https://lrclib.net/api/get`):** Retrieves plain text lyrics without requiring API keys or auth tokens.
+## 2. Technology and external services
 
----
+- Python 3.8+
+- `spotipy` for Spotify OAuth and saved-track access
+- `requests` for HTTP communication
+- `python-dotenv` for local configuration
+- `pandas` for song data and filtering
+- `pytest` for automated tests
+- LRCLIB for plain lyric retrieval
 
-## 2. Core Game Logic & Algorithms
-
-### A. Data Ingestion & Language Separation
-1. **Fetch Saved Tracks:** Queries `sp.current_user_saved_tracks(limit=max_songs)`.
-2. **Sanitize Metadata:** Strips out noisy release tags (`(feat. ...)`, `(Remix)`, etc.) using regex to maximize lyrics API hit rates.
-3. **Language Classification:** Uses Unicode character ranges (`[\u0590-\u05FF]`) to inspect track and artist names, separating the library into discrete **English** and **Hebrew** DataFrames to prevent cross-language mixing.
-
-### B. Lyric Retrieval & Fallback Strategy
-* Queries `lrclib.net/api/get` with `track_name` and `artist_name`.
-* **Fallback Handling:** If a track's lyrics are unavailable (e.g., remixes, obscure tracks), the system assigns a fallback string (`track_name + artist_name`). A boolean flag (`Has Real Lyrics`) ensures only tracks with genuine lyric data are used for target word generation, while fallback tracks safely act as decoys.
-
-### C. Signature Word Extraction Algorithm
-To prevent giveaways, target words must follow strict constraints:
-1. **Stop Word & Metadata Filtering:** Excludes common English stop words, numbers, and any words present in the track title or artist name.
-2. **Frequency Analysis:** Uses `Counter` on the remaining lowercase tokens.
-   * **Easy Mode:** Selects the #1 most frequent keyword.
-   * **Hard Mode:** Randomly selects from the #2 to #5 most frequent keywords (deep cuts).
-3. **Distribution Check:** Validates that the target word appears in **1 to 8 total tracks** in the active library pool to ensure enough valid decoy options exist.
-
-### D. Fill-in-the-Blank Clue Generation
-Scans the song's lyrics line by line to locate the first sentence containing the target word, replaces the target word with underscores (`____`), and displays it as a memory prompt (`Line Clue`).
-
----
-
-## 3. Scoring & Gameplay Mechanics
-
-* **Rounds:** 5 dynamic rounds per session.
-* **Scoring Rules:**
-  * **Base Points:** 10 points for a correct answer.
-  * **Speed Bonus:** +15 points total if answered within $\le 7$ seconds.
-  * **Streak Multiplier:** Score is multiplied by the current consecutive win streak (`Streak × Base Points`). Reset to 0 on incorrect answers.
-* **Decoy Selection:** For each round, 3 random decoy tracks are sampled from the active pool, guaranteed *not* to contain the target word in their text.
-
----
-
-## 4. Project File Structure
+Required environment variables:
 
 ```text
-spotify/
-│
-├── spotify.py           # Main game script & orchestration
-├── requirements.txt     # Python dependencies (spotipy, requests, pandas, python-dotenv)
-└── .env                 # Environment variables (Spotify API credentials)
+SPOTIFY_CLIENT_ID
+SPOTIFY_CLIENT_SECRET
+SPOTIFY_REDIRECT_URI
+```
+
+Secrets and OAuth tokens must remain local and must never be committed to Git.
+
+## 3. Application architecture
+
+```text
+SpotiWord.py       Application orchestration, game flow, scoring, and word analysis
+lyrics_client.py   LRCLIB requests, retries, response handling, and lyric caching
+tests/             Automated tests for pure and isolated behavior
+```
+
+Spotify authentication is created by `create_spotify_client()` when the application starts. Importing the module must not launch authentication or require a browser.
+
+## 4. Data ingestion and language separation
+
+1. Fetch up to `max_songs` saved tracks from Spotify.
+2. Ignore unavailable or deleted Spotify tracks.
+3. Preserve the original track name, primary artist, Spotify URL, lyric text, and lyric availability flag.
+4. Remove common feature and remix tags before querying LRCLIB.
+5. Classify a track as Hebrew when its track name or primary artist contains Hebrew Unicode characters. All other tracks are placed in the English pool.
+
+The current implementation reads one Spotify saved-track page. Pagination is a planned improvement for larger libraries.
+
+## 5. Lyric retrieval
+
+LRCLIB is queried using the cleaned track name and primary artist.
+
+The lyric client must:
+
+- Use a request timeout.
+- Retry temporary failures and rate limits.
+- Treat unavailable lyrics as a normal condition.
+- Cache successful and unavailable lookups locally in `.lyrics_cache.json`.
+- Never allow a cache failure to stop the game.
+
+Tracks without genuine lyrics may be displayed as options, but they must not generate signature words.
+
+## 6. Word processing
+
+Words are normalized using a shared Unicode-aware tokenizer. Matching is case-insensitive and must operate on complete words, not substrings. For example, `art` must not match `party`.
+
+Signature-word rules:
+
+- Ignore stop words, numbers, and words from the track title or artist name.
+- A candidate word must contain alphabetic characters and be longer than three characters.
+- Easy mode selects the most frequent candidate word.
+- Hard mode selects randomly from the second through fifth most frequent candidates that exist.
+- A candidate must occur in no more than eight tracks in the active language pool.
+- A round is valid only when at least three decoy tracks do not contain the target word.
+- The same target word must not create multiple rounds in one session.
+
+## 7. Clue generation
+
+The game searches lyric lines for the first line containing the target word. It replaces the complete target word with `____` and displays the resulting line as the clue.
+
+If no suitable line is found, the game displays a generic hidden-word clue.
+
+## 8. Gameplay
+
+- A session contains up to five valid rounds.
+- Each round has one correct track and three validated decoys.
+- Options are shuffled before display.
+- The player selects an option from 1 through 4.
+- Spotify URLs are displayed after each round.
+- If fewer than one valid round exists, the game exits with an informative message.
+
+## 9. Scoring
+
+For a correct answer:
+
+```text
+base points = 10
+speed bonus = 15 when answered in 7 seconds or less
+round score = (base points + speed bonus) * current streak
+```
+
+An incorrect answer gives zero points and resets the streak. Timing uses a monotonic clock so system clock changes do not affect the result.
+
+## 10. Quality requirements
+
+- Network failures must be handled without exposing credentials or crashing unexpectedly.
+- Pure logic should be testable without Spotify or LRCLIB network access.
+- New behavior should include automated tests.
+- Private files must remain excluded by `.gitignore`.
+- Release versions use Semantic Versioning and Git tags such as `v0.1.0`.
+
+## 11. Planned improvements
+
+- Fetch all saved tracks through Spotify pagination.
+- Improve metadata cleaning for more release-tag formats.
+- Separate Spotify access, analysis, and terminal presentation into additional modules.
+- Add structured logging and a richer command-line interface.
+- Improve language detection beyond track and artist metadata.
