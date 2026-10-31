@@ -113,7 +113,7 @@ An incorrect answer gives zero points and resets the streak. Timing uses a monot
 
 ## 11. GUI requirements
 
-The GUI must keep Spotify and LRCLIB work off the main UI thread. While loading, it must display progress and remain responsive. The current GUI provides selectable sampling size, loading, language and difficulty setup, five-round gameplay, timer-based scoring, clickable Spotify links, a dark theme, and a results dialog while reusing the same game rules as the terminal version.
+The GUI must keep Spotify and LRCLIB work off the main UI thread. While loading, it must display progress, support cancellation, and remain responsive. The current GUI provides selectable sampling size, loading cancellation, language and difficulty setup, five-round gameplay, timer-based scoring, clickable Spotify links, a dark theme, and a results dialog while reusing the same game rules as the terminal version.
 
 ## 12. Planned improvements
 

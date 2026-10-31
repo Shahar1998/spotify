@@ -1,3 +1,5 @@
+import json
+
 import pytest
 import pandas as pd
 from lyrics_client import fetch_lrclib_lyrics
@@ -134,3 +136,27 @@ def test_fetch_lrclib_lyrics_caches_successful_response(tmp_path):
     assert first_result == "Cached lyrics"
     assert second_result == "Cached lyrics"
     assert session.calls == 1
+
+
+def test_expired_missing_lyrics_cache_is_retried(tmp_path):
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"plainLyrics": "Lyrics are available now"}
+
+    class FakeSession:
+        def get(self, *args, **kwargs):
+            return FakeResponse()
+
+    cache_path = tmp_path / "lyrics.json"
+    cache_path.write_text(
+        json.dumps({"song::artist": {"lyrics": None, "cached_at": 0}}),
+        encoding="utf-8",
+    )
+
+    result = fetch_lrclib_lyrics(
+        "Song", "Artist", session=FakeSession(), cache_path=cache_path
+    )
+
+    assert result == "Lyrics are available now"

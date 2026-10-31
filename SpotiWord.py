@@ -19,6 +19,10 @@ STOP_WORDS = {
     'your'
 }
 
+
+class LoadingCancelled(Exception):
+    """Raised when the user cancels library loading."""
+
 dotenv.load_dotenv()
 
 def create_spotify_client():
@@ -185,7 +189,12 @@ def _build_song_entry(item):
     }, is_heb
 
 
-def load_and_categorize_songs(spotify_client, max_songs=100, progress_callback=None):
+def load_and_categorize_songs(
+    spotify_client,
+    max_songs=100,
+    progress_callback=None,
+    cancel_callback=None,
+):
     """Load a random sample of saved songs and retrieve their lyrics."""
     print("Loading your saved-song list from Spotify...")
     page_size = 50
@@ -194,6 +203,8 @@ def load_and_categorize_songs(spotify_client, max_songs=100, progress_callback=N
     all_items = list(first_page.get('items', []))
 
     for offset in range(page_size, total_tracks, page_size):
+        if cancel_callback and cancel_callback():
+            raise LoadingCancelled()
         page = spotify_client.current_user_saved_tracks(
             limit=page_size,
             offset=offset,
@@ -213,6 +224,10 @@ def load_and_categorize_songs(spotify_client, max_songs=100, progress_callback=N
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = [executor.submit(_build_song_entry, item) for item in selected_items]
         for number, future in enumerate(as_completed(futures), 1):
+            if cancel_callback and cancel_callback():
+                for pending_future in futures:
+                    pending_future.cancel()
+                raise LoadingCancelled()
             result = future.result()
             print(f"\rFetching lyrics: {number}/{sample_size}", end='', flush=True)
             if progress_callback:

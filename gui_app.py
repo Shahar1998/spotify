@@ -1,10 +1,12 @@
 import sys
+from threading import Event
 
 from SpotiWord import (
     __version__,
     build_round_options,
     calculate_round_score,
     create_spotify_client,
+    LoadingCancelled,
     load_and_categorize_songs,
     prepare_game_rounds,
 )
@@ -28,10 +30,16 @@ class LibraryLoader(QObject):
     progress = Signal(int, int, str)
     finished = Signal(object, object)
     failed = Signal(str)
+    cancelled = Signal()
 
     def __init__(self, max_songs):
         super().__init__()
         self.max_songs = max_songs
+        self.cancel_requested = Event()
+
+    @Slot()
+    def cancel(self):
+        self.cancel_requested.set()
 
     @Slot()
     def run(self):
@@ -41,8 +49,11 @@ class LibraryLoader(QObject):
                 spotify_client,
                 max_songs=self.max_songs,
                 progress_callback=self.progress.emit,
+                cancel_callback=self.cancel_requested.is_set,
             )
             self.finished.emit(english_songs, hebrew_songs)
+        except LoadingCancelled:
+            self.cancelled.emit()
         except Exception as error:
             self.failed.emit(str(error))
 
@@ -233,6 +244,9 @@ class MainWindow(QMainWindow):
         self.song_count.setSuffix(" songs")
         self.start_button = QPushButton("Load Random Songs")
         self.start_button.clicked.connect(self.start_loading)
+        self.cancel_button = QPushButton("Cancel Loading")
+        self.cancel_button.clicked.connect(self.cancel_loading)
+        self.cancel_button.setEnabled(False)
 
         layout = QVBoxLayout()
         layout.addWidget(QLabel(f"SpotiWord v{__version__}"))
@@ -241,6 +255,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.status_label)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.start_button)
+        layout.addWidget(self.cancel_button)
         container = QWidget()
         container.setLayout(layout)
         self.setCentralWidget(container)
@@ -248,6 +263,7 @@ class MainWindow(QMainWindow):
     @Slot()
     def start_loading(self):
         self.start_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
         self.status_label.setText("Connecting to Spotify...")
         self.progress_bar.setRange(0, 0)
 
@@ -258,8 +274,10 @@ class MainWindow(QMainWindow):
         self.loader.progress.connect(self.update_progress)
         self.loader.finished.connect(self.loading_finished)
         self.loader.failed.connect(self.loading_failed)
+        self.loader.cancelled.connect(self.loading_cancelled)
         self.loader.finished.connect(self.thread.quit)
         self.loader.failed.connect(self.thread.quit)
+        self.loader.cancelled.connect(self.thread.quit)
         self.thread.finished.connect(self.thread.deleteLater)
         self.thread.finished.connect(self.loader.deleteLater)
         self.thread.start()
@@ -281,8 +299,24 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
         self.start_button.setEnabled(True)
+        self.cancel_button.setEnabled(False)
         self.status_label.setText("Loading failed.")
         QMessageBox.critical(self, "SpotiWord Error", message)
+
+    @Slot()
+    def cancel_loading(self):
+        if self.loader:
+            self.cancel_button.setEnabled(False)
+            self.status_label.setText("Cancelling loading...")
+            self.loader.cancel()
+
+    @Slot()
+    def loading_cancelled(self):
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(0)
+        self.start_button.setEnabled(True)
+        self.cancel_button.setEnabled(False)
+        self.status_label.setText("Loading cancelled.")
 
     def show_setup(self):
         setup = SetupWidget(self.english_songs, self.hebrew_songs)
