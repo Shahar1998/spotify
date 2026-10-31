@@ -38,9 +38,27 @@ def create_spotify_client():
         client_id=client_id,
         client_secret=client_secret,
         redirect_uri=redirect_uri,
-        scope='user-library-read',
+        scope='user-library-read playlist-read-private playlist-read-collaborative',
         cache_path=str(SPOTIFY_CACHE_PATH),
     ))
+
+
+def list_spotify_sources(spotify_client):
+    """Return selectable Spotify libraries and playlists."""
+    sources = [{'id': None, 'name': 'Liked Songs', 'kind': 'liked'}]
+    results = spotify_client.current_user_playlists(limit=50)
+    while results:
+        for playlist in results.get('items', []):
+            if playlist and playlist.get('id'):
+                sources.append({
+                    'id': playlist['id'],
+                    'name': playlist.get('name', 'Unnamed playlist'),
+                    'kind': 'playlist',
+                })
+        if not results.get('next'):
+            break
+        results = spotify_client.next(results)
+    return sources
 
 
 def clean_track_name(name):
@@ -66,12 +84,25 @@ def _build_song_entry(item, lyrics_cache=None):
         lyrics=lyrics if has_real_lyrics else f'{original_name} {artist_name}',
         has_real_lyrics=has_real_lyrics,
         album_art_url=album_images[0].get('url') if album_images else None,
+        preview_url=track.get('preview_url'),
     ), is_hebrew(original_name) or is_hebrew(artist_name)
 
 
-def load_and_categorize_songs(spotify_client, max_songs=100, progress_callback=None, cancel_callback=None):
-    page_size = 50
-    metadata = spotify_client.current_user_saved_tracks(limit=1, offset=0)
+def load_and_categorize_songs(
+    spotify_client,
+    max_songs=100,
+    progress_callback=None,
+    cancel_callback=None,
+    source=None,
+):
+    source = source or {'id': None, 'kind': 'liked', 'name': 'Liked Songs'}
+    page_size = 50 if source['kind'] == 'liked' else 100
+    fetch_page = (
+        spotify_client.current_user_saved_tracks
+        if source['kind'] == 'liked'
+        else lambda **kwargs: spotify_client.playlist_items(source['id'], **kwargs)
+    )
+    metadata = fetch_page(limit=1, offset=0)
     total_tracks = metadata.get('total', len(metadata.get('items', [])))
     total_pages = max(1, math.ceil(total_tracks / page_size))
     pages_needed = min(total_pages, max(1, math.ceil(max_songs / page_size) + 1))
@@ -80,7 +111,7 @@ def load_and_categorize_songs(spotify_client, max_songs=100, progress_callback=N
     for page_number in selected_pages:
         if cancel_callback and cancel_callback():
             raise LoadingCancelled()
-        page = spotify_client.current_user_saved_tracks(limit=page_size, offset=page_number * page_size)
+        page = fetch_page(limit=page_size, offset=page_number * page_size)
         items.extend(page.get('items', []))
 
     unique_items = {}
