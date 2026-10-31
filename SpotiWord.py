@@ -9,6 +9,8 @@ from spotipy.oauth2 import SpotifyOAuth
 import dotenv
 import pandas as pd
 
+__version__ = "0.1.0"
+
 dotenv.load_dotenv()
 
 # 1. Spotify Setup & Authentication
@@ -168,6 +170,7 @@ def start_lyric_game(df, language_name, difficulty_level):
     selected_rounds = random.sample(valid_rounds_data, total_rounds)
 
     print("\n" + "="*50)
+    print(f"SpotiWord v{__version__}")
     print(f"🎯 WELCOME TO LYRIQ ({language_name.upper()} - {difficulty_level.upper()} MODE)! 🎯")
     print("="*50 + "\n")
 
