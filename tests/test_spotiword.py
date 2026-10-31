@@ -71,6 +71,18 @@ def test_get_decoy_indices_guarantees_whole_word_exclusion():
     assert get_decoy_indices(songs, "art") == [20, 30, 40, 50]
 
 
+def test_tracks_without_real_lyrics_remain_safe_decoys():
+    songs = pd.DataFrame(
+        {
+            "Lyrics": ["art art", "fallback title", "party", "music"],
+            "Has Real Lyrics": [True, False, True, True],
+        },
+        index=[10, 20, 30, 40],
+    )
+
+    assert get_decoy_indices(songs, "art") == [20, 30, 40]
+
+
 def test_prepare_game_rounds_and_options_are_playable():
     songs = pd.DataFrame(
         {

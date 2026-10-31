@@ -8,7 +8,7 @@ from SpotiWord import (
     load_and_categorize_songs,
     prepare_game_rounds,
 )
-from PySide6.QtCore import QElapsedTimer, QObject, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import QElapsedTimer, QObject, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -17,9 +17,11 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
+from PySide6.QtGui import QDesktopServices
 
 
 class LibraryLoader(QObject):
@@ -27,13 +29,17 @@ class LibraryLoader(QObject):
     finished = Signal(object, object)
     failed = Signal(str)
 
+    def __init__(self, max_songs):
+        super().__init__()
+        self.max_songs = max_songs
+
     @Slot()
     def run(self):
         try:
             spotify_client = create_spotify_client()
             english_songs, hebrew_songs = load_and_categorize_songs(
                 spotify_client,
-                max_songs=200,
+                max_songs=self.max_songs,
                 progress_callback=self.progress.emit,
             )
             self.finished.emit(english_songs, hebrew_songs)
@@ -91,6 +97,7 @@ class GameWidget(QWidget):
         self.options = []
         self.correct_option = 0
         self.answer_buttons = []
+        self.link_buttons = []
         self.elapsed_timer = QElapsedTimer()
         self.clock_timer = QTimer(self)
         self.clock_timer.timeout.connect(self.update_clock)
@@ -122,6 +129,12 @@ class GameWidget(QWidget):
             self.answer_buttons.append(button)
             layout.addWidget(button)
 
+        for number in range(4):
+            link_button = QPushButton()
+            link_button.setVisible(False)
+            self.link_buttons.append(link_button)
+            layout.addWidget(link_button)
+
         layout.addWidget(self.result_label)
         layout.addWidget(self.next_button)
         self.show_round()
@@ -141,6 +154,9 @@ class GameWidget(QWidget):
         for button, option in zip(self.answer_buttons, self.options):
             button.setText(f"{option['Track Name']} — {option['Artist']}")
             button.setEnabled(True)
+
+        for link_button in self.link_buttons:
+            link_button.setVisible(False)
 
         self.elapsed_timer.start()
         self.clock_timer.start(100)
@@ -170,6 +186,17 @@ class GameWidget(QWidget):
             )
 
         self.score_label.setText(f"Score: {self.score}    Streak: {self.streak}")
+        for link_button, option in zip(self.link_buttons, self.options):
+            link_button.setText(f"Open {option['Track Name']} in Spotify")
+            try:
+                link_button.clicked.disconnect()
+            except TypeError:
+                pass
+            link_button.clicked.connect(
+                lambda checked=False, url=option['Spotify URL']:
+                QDesktopServices.openUrl(QUrl(url))
+            )
+            link_button.setVisible(bool(option['Spotify URL']))
         self.next_button.setText(
             "Finish Game" if self.round_number + 1 == len(self.rounds) else "Next Round"
         )
@@ -199,11 +226,18 @@ class MainWindow(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
-        self.start_button = QPushButton("Load 200 Random Songs")
+        self.song_count = QSpinBox()
+        self.song_count.setRange(20, 200)
+        self.song_count.setSingleStep(10)
+        self.song_count.setValue(200)
+        self.song_count.setSuffix(" songs")
+        self.start_button = QPushButton("Load Random Songs")
         self.start_button.clicked.connect(self.start_loading)
 
         layout = QVBoxLayout()
         layout.addWidget(QLabel(f"SpotiWord v{__version__}"))
+        layout.addWidget(QLabel("Number of songs to sample:"))
+        layout.addWidget(self.song_count)
         layout.addWidget(self.status_label)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.start_button)
@@ -218,7 +252,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, 0)
 
         self.thread = QThread(self)
-        self.loader = LibraryLoader()
+        self.loader = LibraryLoader(self.song_count.value())
         self.loader.moveToThread(self.thread)
         self.thread.started.connect(self.loader.run)
         self.loader.progress.connect(self.update_progress)
@@ -273,6 +307,17 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    app.setStyleSheet(
+        """
+        QWidget { background: #181818; color: #f2f2f2; font-size: 14px; }
+        QPushButton { background: #1db954; color: #ffffff; border: none; padding: 10px; border-radius: 5px; }
+        QPushButton:hover { background: #1ed760; }
+        QPushButton:disabled { background: #555555; color: #aaaaaa; }
+        QComboBox, QSpinBox { background: #282828; color: #ffffff; padding: 7px; border: 1px solid #555555; }
+        QProgressBar { border: 1px solid #555555; text-align: center; }
+        QProgressBar::chunk { background: #1db954; }
+        """
+    )
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

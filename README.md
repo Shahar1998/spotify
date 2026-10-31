@@ -47,7 +47,7 @@ To launch the GUI loading window:
 python gui_app.py
 ```
 
-The GUI provides a responsive library-loading screen, language and difficulty setup, five-round gameplay, timer-based scoring, and a results dialog. Spotify and lyric loading run in the background so the window remains responsive.
+The GUI provides a responsive library-loading screen, selectable sample size, language and difficulty setup, five-round gameplay, timer-based scoring, Spotify links, and a results dialog. Spotify and lyric loading run in the background so the window remains responsive. It uses a dark Spotify-inspired theme.
 
 The first run may open a browser for Spotify authorization. Spotify authentication is created only when the application starts; importing the module does not trigger login.
 

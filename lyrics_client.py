@@ -8,6 +8,7 @@ import requests
 
 DEFAULT_CACHE_PATH = Path('.lyrics_cache.json')
 RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
+NEGATIVE_CACHE_TTL_SECONDS = 24 * 60 * 60
 _CACHE_LOCK = Lock()
 
 
@@ -51,7 +52,14 @@ def fetch_lrclib_lyrics(
     cache = _load_cache(cache_path)
     key = _cache_key(track_name, artist_name)
     if key in cache:
-        return cache[key]
+        cached_value = cache[key]
+        if isinstance(cached_value, dict):
+            cached_lyrics = cached_value.get('lyrics')
+            cached_at = cached_value.get('cached_at', 0)
+            if cached_lyrics or time.time() - cached_at < NEGATIVE_CACHE_TTL_SECONDS:
+                return cached_lyrics
+        else:
+            return cached_value
 
     owns_session = session is None
     http = session or requests.Session()
@@ -78,12 +86,12 @@ def fetch_lrclib_lyrics(
                     data = response.json()
                     lyrics = data.get('plainLyrics')
                     result = lyrics.strip() if isinstance(lyrics, str) else None
-                    cache[key] = result
+                    cache[key] = {'lyrics': result, 'cached_at': time.time()}
                     _save_cache(cache_path, cache)
                     return result
 
                 if response.status_code == 404:
-                    cache[key] = None
+                    cache[key] = {'lyrics': None, 'cached_at': time.time()}
                     _save_cache(cache_path, cache)
                     return None
 
@@ -98,6 +106,6 @@ def fetch_lrclib_lyrics(
         if owns_session:
             http.close()
 
-    cache[key] = None
+    cache[key] = {'lyrics': None, 'cached_at': time.time()}
     _save_cache(cache_path, cache)
     return None

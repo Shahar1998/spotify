@@ -74,8 +74,9 @@ def get_decoy_indices(df, target_word):
     """Return track indices whose lyrics do not contain the target word."""
     return [
         idx
-        for idx, lyrics in df['Lyrics'].items()
-        if target_word not in set(tokenize_words(str(lyrics)))
+        for idx, row in df.iterrows()
+        if not row.get('Has Real Lyrics', True)
+        or target_word not in set(tokenize_words(str(row['Lyrics'])))
     ]
 
 
@@ -83,6 +84,8 @@ def prepare_game_rounds(df, difficulty_level, max_rounds=5):
     """Create playable rounds using the same rules for CLI and GUI games."""
     word_to_tracks = {}
     for idx, row in df.iterrows():
+        if not row['Has Real Lyrics']:
+            continue
         words = tokenize_words(row['Lyrics'])
         for word in set(words):
             if len(word) > 3 and word not in STOP_WORDS and any(c.isalpha() for c in word):
@@ -182,7 +185,7 @@ def _build_song_entry(item):
     }, is_heb
 
 
-def load_and_categorize_songs(spotify_client, max_songs=200, progress_callback=None):
+def load_and_categorize_songs(spotify_client, max_songs=100, progress_callback=None):
     """Load a random sample of saved songs and retrieve their lyrics."""
     print("Loading your saved-song list from Spotify...")
     page_size = 50
