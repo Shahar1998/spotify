@@ -53,7 +53,9 @@ def test_results_widget_displays_final_score(qt_app):
         "correct_answers": 3,
         "total_rounds": 5,
         "best_streak": 2,
+        "language": "English",
+        "difficulty": "easy",
     }
-    results = ResultsWidget(result)
+    results = ResultsWidget(result, [result])
 
     assert any(label.text() == "75" for label in results.findChildren(QLabel))

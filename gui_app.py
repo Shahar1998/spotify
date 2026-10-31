@@ -9,6 +9,7 @@ from core import (
     prepare_game_rounds,
 )
 from models import Song
+from scores import save_score, top_scores
 from spotify_service import (
     LoadingCancelled,
     create_spotify_client,
@@ -187,6 +188,8 @@ class GameWidget(QWidget):
 
     def __init__(self, songs, language, difficulty):
         super().__init__()
+        self.language = language
+        self.difficulty = difficulty
         self.setLayoutDirection(Qt.RightToLeft if language == "Hebrew" else Qt.LeftToRight)
         self.rounds = prepare_game_rounds(songs, difficulty)
         if not self.rounds:
@@ -383,6 +386,8 @@ class GameWidget(QWidget):
                 'correct_answers': self.correct_answers,
                 'total_rounds': len(self.rounds),
                 'best_streak': self.best_streak,
+                'language': self.language,
+                'difficulty': self.difficulty,
             })
             return
         self.round_number += 1
@@ -393,7 +398,7 @@ class ResultsWidget(QWidget):
     play_again = Signal()
     change_source = Signal()
 
-    def __init__(self, result):
+    def __init__(self, result, scores):
         super().__init__()
         title = QLabel("GAME COMPLETE")
         title.setObjectName("pageTitle")
@@ -404,6 +409,17 @@ class ResultsWidget(QWidget):
             f"Accuracy: {accuracy:.0f}%\nBest streak: {result['best_streak']}"
         )
         summary.setObjectName("mutedText")
+        leaderboard_text = "TOP SCORES\n"
+        if scores:
+            leaderboard_text += "\n".join(
+                f"{index}. {item['score']} pts — {item['language']} / {item['difficulty']}"
+                for index, item in enumerate(scores, 1)
+            )
+        else:
+            leaderboard_text += "No scores yet"
+        leaderboard = QLabel(leaderboard_text)
+        leaderboard.setObjectName("mutedText")
+        leaderboard.setAlignment(Qt.AlignCenter)
         replay = QPushButton("Play Again")
         replay.setObjectName("primaryButton")
         replay.clicked.connect(self.play_again)
@@ -418,6 +434,7 @@ class ResultsWidget(QWidget):
         layout.addWidget(QLabel("FINAL SCORE"), alignment=Qt.AlignCenter)
         layout.addWidget(score, alignment=Qt.AlignCenter)
         layout.addWidget(summary, alignment=Qt.AlignCenter)
+        layout.addWidget(leaderboard, alignment=Qt.AlignCenter)
         layout.addSpacing(20)
         layout.addWidget(replay)
         layout.addWidget(change_source)
@@ -579,7 +596,8 @@ class MainWindow(QMainWindow):
 
     @Slot(object)
     def show_results(self, result):
-        results = ResultsWidget(result)
+        save_score(result)
+        results = ResultsWidget(result, top_scores())
         results.play_again.connect(self.show_setup)
         results.change_source.connect(lambda: self.show_source_setup(self.sources))
         self.setCentralWidget(results)
