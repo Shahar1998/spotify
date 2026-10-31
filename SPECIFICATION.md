@@ -126,3 +126,4 @@ The GUI must keep Spotify and LRCLIB work off the main UI thread. While loading,
 - Separate Spotify access, analysis, and terminal presentation into additional modules.
 - Add structured logging and a richer command-line interface.
 - Improve language detection beyond track and artist metadata.
+- Add a signed Windows installer and application icon.

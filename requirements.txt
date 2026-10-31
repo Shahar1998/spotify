@@ -3,3 +3,4 @@ requests
 spotipy
 pytest
 PySide6
+pyinstaller

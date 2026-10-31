@@ -190,6 +190,7 @@ class GameWidget(QWidget):
             link_button = QPushButton()
             link_button.setObjectName("linkButton")
             link_button.setVisible(False)
+            link_button.clicked.connect(self.open_spotify_link)
             self.link_buttons.append(link_button)
             links.addWidget(link_button)
 
@@ -268,16 +269,18 @@ class GameWidget(QWidget):
 
         for link_button, option in zip(self.link_buttons, self.options):
             link_button.setText(f"Open {option.track_name}")
-            try:
-                link_button.clicked.disconnect()
-            except TypeError:
-                pass
-            link_button.clicked.connect(lambda checked=False, url=option.spotify_url: QDesktopServices.openUrl(QUrl(url)))
+            link_button.setProperty("spotify_url", option.spotify_url)
             link_button.setVisible(bool(option.spotify_url))
 
         self.load_album_art(self.options[self.correct_option - 1].album_art_url)
         self.next_button.setText("Finish Game" if self.round_number + 1 == len(self.rounds) else "Next Round")
         self.next_button.setVisible(True)
+
+    @Slot()
+    def open_spotify_link(self):
+        url = self.sender().property("spotify_url")
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
 
     def load_album_art(self, image_url):
         if not image_url:

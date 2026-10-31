@@ -65,6 +65,16 @@ Run the automated tests with:
 python -m pytest -q
 ```
 
+## Build a Windows executable
+
+Install the project dependencies, then run:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -File .\build.ps1
+```
+
+The executable is created at `dist\SpotiWord\SpotiWord.exe`. Keep the `.env` file beside the executable; credentials are not bundled into the application.
+
 The tests cover title cleanup, Hebrew detection, clue generation, word boundaries, scoring, decoy validation, configuration errors, and lyric caching. Tests do not call Spotify or LRCLIB over the network.
 
 ## Project layout

@@ -5,3 +5,6 @@ __pycache__/
 .cache
 .lyrics_cache.json
 *.xlsx
+build/
+dist/
+*.spec
