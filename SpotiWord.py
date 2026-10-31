@@ -13,12 +13,31 @@ __version__ = "0.1.0"
 
 dotenv.load_dotenv()
 
-# 1. Spotify Setup & Authentication
-os.environ['SPOTIPY_CLIENT_ID'] = os.getenv('SPOTIFY_CLIENT_ID')
-os.environ['SPOTIPY_CLIENT_SECRET'] = os.getenv('SPOTIFY_CLIENT_SECRET')
-os.environ['SPOTIPY_REDIRECT_URI'] = os.getenv('SPOTIFY_REDIRECT_URI')
+def create_spotify_client():
+    """Create an authenticated Spotify client from the local environment."""
+    client_id = os.getenv('SPOTIFY_CLIENT_ID')
+    client_secret = os.getenv('SPOTIFY_CLIENT_SECRET')
+    redirect_uri = os.getenv('SPOTIFY_REDIRECT_URI')
 
-sp = spotipy.Spotify(auth_manager=SpotifyOAuth(scope='user-library-read'))
+    missing_values = []
+    if not client_id:
+        missing_values.append('SPOTIFY_CLIENT_ID')
+    if not client_secret:
+        missing_values.append('SPOTIFY_CLIENT_SECRET')
+    if not redirect_uri:
+        missing_values.append('SPOTIFY_REDIRECT_URI')
+
+    if missing_values:
+        missing = ', '.join(missing_values)
+        raise RuntimeError(f'Missing Spotify configuration: {missing}')
+
+    auth_manager = SpotifyOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        scope='user-library-read'
+    )
+    return spotipy.Spotify(auth_manager=auth_manager)
 
 def clean_track_name(name):
     """Removes extra tags like '(feat. ...)', 'Remix', etc. to help match lyrics accurately."""
@@ -65,9 +84,9 @@ def get_lyric_snippet_clue(lyrics_text, target_word):
             
     return f"Line Clue: Contains the word '____'"
 
-def load_and_categorize_songs(max_songs=40):
+def load_and_categorize_songs(spotify_client, max_songs=40):
     print("Loading your saved songs from Spotify and categorizing by language...")
-    results = sp.current_user_saved_tracks(limit=max_songs)
+    results = spotify_client.current_user_saved_tracks(limit=max_songs)
     
     english_songs = []
     hebrew_songs = []
@@ -231,7 +250,8 @@ def start_lyric_game(df, language_name, difficulty_level):
     print("="*50)
 
 if __name__ == '__main__':
-    df_english, df_hebrew = load_and_categorize_songs(max_songs=40)
+    spotify_client = create_spotify_client()
+    df_english, df_hebrew = load_and_categorize_songs(spotify_client, max_songs=40)
     
     print("Select Game Language:")
     print("  [1] English Songs")
