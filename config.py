@@ -16,6 +16,14 @@ def application_directory():
     return Path(__file__).resolve().parent
 
 
+def resource_directory():
+    """Return the directory where PyInstaller bundles read-only resources."""
+    bundled_directory = getattr(sys, "_MEIPASS", None)
+    if bundled_directory:
+        return Path(bundled_directory)
+    return application_directory()
+
+
 def user_data_directory():
     """Return a writable per-user directory for tokens and caches."""
     local_app_data = os.getenv("LOCALAPPDATA")

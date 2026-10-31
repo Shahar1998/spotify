@@ -1,5 +1,6 @@
 import sys
 import logging
+from pathlib import Path
 from threading import Event
 
 from core import (
@@ -9,7 +10,7 @@ from core import (
     is_hebrew,
     prepare_game_rounds,
 )
-from config import configure_logging, missing_configuration, save_configuration
+from config import configure_logging, missing_configuration, resource_directory, save_configuration
 from models import Song
 from scores import save_score, top_scores
 from spotify_service import (
@@ -19,7 +20,7 @@ from spotify_service import (
     load_and_categorize_songs,
 )
 from PySide6.QtCore import QElapsedTimer, QObject, QThread, QTimer, Qt, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices, QPixmap
+from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PySide6.QtWidgets import (
     QApplication,
@@ -506,6 +507,9 @@ class MainWindow(QMainWindow):
         self.hebrew_songs = None
         self.sources = []
         self.setWindowTitle(f"SpotiWord v{__version__}")
+        icon_path = resource_directory() / "assets" / "spotiword.svg"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
         self.setMinimumSize(760, 700)
 
         self.show_loading_screen()
