@@ -1,5 +1,5 @@
 #define MyAppName "SpotiWord"
-#define MyAppVersion "0.3.0"
+#define MyAppVersion "0.4.0"
 #define MyAppPublisher "SpotiWord"
 #define MyAppExeName "SpotiWord.exe"
 

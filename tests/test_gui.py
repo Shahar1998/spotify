@@ -8,7 +8,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication, QLabel
 
-from gui_app import GameWidget, ResultsWidget, SetupWidget
+from gui_app import FillInGameWidget, GameWidget, MainWindow, ResultsWidget, SetupWidget
 from models import Song
 
 
@@ -46,6 +46,14 @@ def test_setup_can_select_blitz_mode(qt_app, songs):
     setup.start()
 
     assert received[0][3] == "blitz"
+
+
+def test_main_window_starts_fill_in_widget_for_fill_in_mode(qt_app, songs):
+    window = MainWindow()
+
+    window.start_game(songs, "English", "easy", "fill_in")
+
+    assert isinstance(window.centralWidget(), FillInGameWidget)
 
 
 def test_game_disables_answers_and_updates_score(qt_app, songs):

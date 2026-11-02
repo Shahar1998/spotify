@@ -1,8 +1,14 @@
 import json
 
 import pytest
+import requests
 from models import Song
-from core import HEBREW_STOP_WORDS, strip_hebrew_niqqud
+from core import (
+    HEBREW_STOP_WORDS,
+    build_fillin_options,
+    prepare_fillin_rounds,
+    strip_hebrew_niqqud,
+)
 from lyrics_client import LyricsCache, fetch_lrclib_lyrics
 from spotify_service import list_spotify_sources, start_track_playback
 
@@ -113,6 +119,25 @@ def test_prepare_game_rounds_and_options_are_playable():
     assert 1 <= correct_option <= 4
 
 
+def test_prepare_fillin_rounds_create_four_word_options():
+    songs = [
+        Song("Track One", "Artist A", "", "summer summer summer in the night", True),
+        Song("Track Two", "Artist B", "", "ocean ocean ocean in the night", True),
+        Song("Track Three", "Artist C", "", "mountain mountain mountain in the night", True),
+        Song("Track Four", "Artist D", "", "forest forest forest in the night", True),
+    ]
+
+    rounds = prepare_fillin_rounds(songs, "easy", max_rounds=5)
+
+    assert len(rounds) == 4
+    for round_info in rounds:
+        options, correct_option = build_fillin_options(round_info)
+        assert len(options) == 4
+        assert options[correct_option - 1] == round_info["target_word"]
+        assert "____" in round_info["blanked_line"]
+        assert len(round_info["decoy_words"]) == 3
+
+
 def test_fetch_lrclib_lyrics_caches_successful_response(tmp_path):
     class FakeResponse:
         status_code = 200
@@ -140,6 +165,92 @@ def test_fetch_lrclib_lyrics_caches_successful_response(tmp_path):
 
     assert first_result == "Cached lyrics"
     assert second_result == "Cached lyrics"
+    assert session.calls == 1
+
+
+def test_temporary_lyric_failure_is_retried_on_a_later_lookup(
+    monkeypatch, tmp_path, caplog
+):
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"plainLyrics": "Lyrics recovered"}
+
+    class FailOnceSession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise requests.ConnectionError("temporary network failure")
+            return FakeResponse()
+
+    monkeypatch.setattr("lyrics_client.time.sleep", lambda _: None)
+    session = FailOnceSession()
+    cache = LyricsCache(tmp_path / "lyrics.json")
+
+    first_result = fetch_lrclib_lyrics(
+        "Song", "Artist", session=session, cache=cache, max_attempts=1
+    )
+    second_result = fetch_lrclib_lyrics(
+        "Song", "Artist", session=session, cache=cache, max_attempts=1
+    )
+
+    assert first_result is None
+    assert second_result == "Lyrics recovered"
+    assert session.calls == 2
+    assert "ConnectionError" in caplog.text
+
+
+def test_retryable_http_failure_is_not_cached(monkeypatch, tmp_path, caplog):
+    class FakeResponse:
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+        def json(self):
+            return {"plainLyrics": "Lyrics recovered"}
+
+    class FailOnceSession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, *args, **kwargs):
+            self.calls += 1
+            return FakeResponse(503 if self.calls == 1 else 200)
+
+    monkeypatch.setattr("lyrics_client.time.sleep", lambda _: None)
+    session = FailOnceSession()
+    cache = LyricsCache(tmp_path / "lyrics.json")
+
+    assert fetch_lrclib_lyrics(
+        "Song", "Artist", session=session, cache=cache, max_attempts=1
+    ) is None
+    assert fetch_lrclib_lyrics(
+        "Song", "Artist", session=session, cache=cache, max_attempts=1
+    ) == "Lyrics recovered"
+    assert session.calls == 2
+    assert "HTTP 503" in caplog.text
+
+
+def test_not_found_lyrics_are_negative_cached(tmp_path):
+    class NotFoundResponse:
+        status_code = 404
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, *args, **kwargs):
+            self.calls += 1
+            return NotFoundResponse()
+
+    session = FakeSession()
+    cache = LyricsCache(tmp_path / "lyrics.json")
+
+    assert fetch_lrclib_lyrics("Song", "Artist", session=session, cache=cache) is None
+    assert fetch_lrclib_lyrics("Song", "Artist", session=session, cache=cache) is None
     assert session.calls == 1
 
 

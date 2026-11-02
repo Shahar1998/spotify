@@ -1,12 +1,15 @@
 import json
+import logging
 import time
 from pathlib import Path
 from threading import Lock, local
 
 import requests
 from config import LYRICS_CACHE_PATH
+from core import __version__
 
 
+LOGGER = logging.getLogger(__name__)
 DEFAULT_CACHE_PATH = LYRICS_CACHE_PATH
 RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 NEGATIVE_CACHE_TTL_SECONDS = 24 * 60 * 60
@@ -90,6 +93,9 @@ def fetch_lrclib_lyrics(
     max_attempts=3,
 ):
     """Fetch and cache plain lyrics from LRCLIB with retry handling."""
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be at least 1")
+
     key = _cache_key(track_name, artist_name)
     owns_cache = cache is None
     lyric_cache = cache or LyricsCache(cache_path)
@@ -104,45 +110,52 @@ def fetch_lrclib_lyrics(
         'artist_name': artist_name,
     }
     request_headers = {
-        'User-Agent': 'SpotiWord/0.3.0',
+        'User-Agent': f'SpotiWord/{__version__}',
     }
 
-    try:
-        for attempt in range(max_attempts):
-            try:
-                response = http.get(
-                    request_url,
-                    params=request_params,
-                    headers=request_headers,
-                    timeout=5,
+    failure_message = 'unknown response'
+    for attempt in range(max_attempts):
+        try:
+            response = http.get(
+                request_url,
+                params=request_params,
+                headers=request_headers,
+                timeout=5,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                if not isinstance(data, dict):
+                    raise ValueError("LRCLIB returned an invalid response")
+                lyrics = data.get('plainLyrics')
+                result = lyrics.strip() if isinstance(lyrics, str) else None
+                lyric_cache.set(key, result)
+                if owns_cache:
+                    lyric_cache.flush()
+                return result
+
+            if response.status_code == 404:
+                lyric_cache.set(key, None)
+                if owns_cache:
+                    lyric_cache.flush()
+                return None
+
+            if response.status_code not in RETRY_STATUS_CODES:
+                LOGGER.warning(
+                    "LRCLIB returned HTTP %s; lyric lookup will not be cached",
+                    response.status_code,
                 )
+                return None
+            failure_message = f"HTTP {response.status_code}"
+        except (requests.RequestException, ValueError) as error:
+            failure_message = type(error).__name__
 
-                if response.status_code == 200:
-                    data = response.json()
-                    lyrics = data.get('plainLyrics')
-                    result = lyrics.strip() if isinstance(lyrics, str) else None
-                    lyric_cache.set(key, result)
-                    if owns_cache:
-                        lyric_cache.flush()
-                    return result
+        if attempt < max_attempts - 1:
+            time.sleep(2 ** attempt)
 
-                if response.status_code == 404:
-                    lyric_cache.set(key, None)
-                    if owns_cache:
-                        lyric_cache.flush()
-                    return None
-
-                if response.status_code not in RETRY_STATUS_CODES:
-                    break
-            except (requests.RequestException, ValueError):
-                pass
-
-            if attempt < max_attempts - 1:
-                time.sleep(2 ** attempt)
-    finally:
-        pass
-
-    lyric_cache.set(key, None)
-    if owns_cache:
-        lyric_cache.flush()
+    LOGGER.warning(
+        "LRCLIB lookup failed after %s attempts: %s",
+        max_attempts,
+        failure_message,
+    )
     return None

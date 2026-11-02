@@ -2,7 +2,7 @@
 
 SpotiWord is a lyric trivia game with both terminal and desktop GUI modes. It uses songs saved in a user's Spotify library, retrieves lyrics from LRCLIB, identifies signature words, and creates multiple-choice rounds.
 
-Current version: **0.3.0**
+Current version: **0.4.0**
 
 ## Requirements
 
@@ -53,7 +53,7 @@ To launch the GUI loading window:
 python gui_app.py
 ```
 
-The GUI provides a responsive library-loading screen, Liked Songs and playlist selection, selectable sample size, loading cancellation, language and difficulty setup, Classic five-round gameplay, Blitz 60-second gameplay, a color-changing countdown bar, combo streak scoring, one-use power-ups, achievements, synthesized answer and streak sounds with a mute toggle, optional Spotify Connect playback after answers, timer-based scoring, answer-state colors, Spotify links, asynchronously loaded album artwork, RTL Hebrew support, local high-score history, and a results screen. Spotify and lyric loading run in the background so the window remains responsive. It uses a dark Spotify-inspired theme.
+The GUI provides a responsive library-loading screen, Liked Songs and playlist selection, selectable sample size, loading cancellation, language and difficulty setup, Classic five-round gameplay, Blitz 60-second gameplay, Fill in the Blank lyric rounds, a color-changing countdown bar, combo streak scoring, one-use power-ups, achievements, synthesized answer and streak sounds with a mute toggle, optional Spotify Connect playback after answers, timer-based scoring, answer-state colors, Spotify links, asynchronously loaded album artwork, RTL Hebrew support, local high-score history, and a results screen. Spotify and lyric loading run in the background so the window remains responsive. It uses a dark Spotify-inspired theme.
 
 After answering, **Play Correct Song** starts the correct track without advancing the round. **Next Question** advances when more rounds are available; **Finish Game** appears on the final valid round.
 
@@ -85,7 +85,7 @@ powershell.exe -ExecutionPolicy Bypass -File .\build-installer.ps1
 
 The installer is created in the `installer/` directory. It installs shortcuts and includes `.env.example`, never the real `.env` file.
 
-The tests cover title cleanup, Hebrew detection, clue generation, word boundaries, scoring, decoy validation, configuration errors, lyric caching, GUI modes, power-ups, achievements, and playback device selection. Tests do not call Spotify or LRCLIB over the network.
+The tests cover title cleanup, Hebrew detection, clue generation, word boundaries, scoring, decoy validation, fill-in rounds and mode routing, configuration errors, lyric caching and retry behavior, GUI modes, power-ups, achievements, and playback device selection. Tests do not call Spotify or LRCLIB over the network.
 
 ## Project layout
 
@@ -118,4 +118,4 @@ The project follows Semantic Versioning:
 MAJOR.MINOR.PATCH
 ```
 
-The current released version is `0.3.0`. The playback, Blitz, power-up, achievement, and installer improvements are currently unreleased development work. Git release tags use the `v` prefix, for example `v0.3.0`.
+The current version is `0.4.0`, which adds Fill in the Blank gameplay and improves LRCLIB failure handling. Git release tags use the `v` prefix, for example `v0.4.0`.

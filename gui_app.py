@@ -8,9 +8,11 @@ from threading import Event
 
 from core import (
     __version__,
+    build_fillin_options,
     build_round_options,
     calculate_round_score,
     is_hebrew,
+    prepare_fillin_rounds,
     prepare_game_rounds,
 )
 from config import configure_logging, missing_configuration, resource_directory, save_configuration
@@ -322,6 +324,7 @@ class SetupWidget(QWidget):
         self.mode_combo = QComboBox()
         self.mode_combo.addItem("Classic - 5 rounds", "classic")
         self.mode_combo.addItem("Blitz - 60 seconds", "blitz")
+        self.mode_combo.addItem("Fill in the Blank - guess the word", "fill_in")
 
         start_button = QPushButton("Start Game")
         start_button.setObjectName("primaryButton")
@@ -779,6 +782,332 @@ class GameWidget(QWidget):
         })
 
 
+class FillInGameWidget(QWidget):
+    """Fill-in-the-blank mode: see the song and a blanked lyric, pick the missing word."""
+
+    finished = Signal(object)
+    change_source = Signal()
+
+    def __init__(self, songs, language, difficulty):
+        super().__init__()
+        self.language = language
+        self.difficulty = difficulty
+        self.mode = "fill_in"
+        self.setLayoutDirection(Qt.RightToLeft if language == "Hebrew" else Qt.LeftToRight)
+        self.rounds = prepare_fillin_rounds(songs, difficulty)
+        if not self.rounds:
+            raise ValueError(f"No suitable fill-in rounds found for the {language} song pool.")
+
+        self.songs = songs
+        self.round_number = 0
+        self.score = 0
+        self.streak = 0
+        self.best_streak = 0
+        self.correct_answers = 0
+        self.answered_rounds = 0
+        self.answered_current_round = False
+        self.used_fifty_fifty = False
+        self.options = []
+        self.correct_option = 0
+        self.answer_buttons = []
+        self.elapsed_timer = QElapsedTimer()
+        self.clock_timer = QTimer(self)
+        self.clock_timer.timeout.connect(self.update_clock)
+        self.sounds = SoundEffects(self)
+        self.network_manager = QNetworkAccessManager(self)
+        self.active_art_reply = None
+
+        # Playback support
+        self.playback_enabled = False
+        self.playback_thread = None
+        self.playback_worker = None
+
+        # Header stats
+        self.round_label = QLabel()
+        self.score_label = QLabel()
+        self.streak_label = QLabel()
+        self.timer_label = QLabel()
+        self.sound_button = QPushButton("🔊 Sound On")
+        self.sound_button.setObjectName("linkButton")
+        self.sound_button.clicked.connect(self.toggle_sound)
+        self.fifty_button = QPushButton("50/50")
+        self.fifty_button.setObjectName("linkButton")
+        self.fifty_button.clicked.connect(self.use_fifty_fifty)
+        self.playback_toggle = QPushButton("Spotify: Off")
+        self.playback_toggle.setObjectName("linkButton")
+        self.playback_toggle.clicked.connect(self.toggle_playback)
+        self.play_button = QPushButton("▶ Play Song")
+        self.play_button.setObjectName("linkButton")
+        self.play_button.setVisible(False)
+        self.play_button.clicked.connect(self.play_correct_song)
+
+        # Song identity
+        self.song_label = QLabel()
+        self.song_label.setObjectName("signatureWord")
+        self.song_label.setAlignment(Qt.AlignCenter)
+        self.song_label.setWordWrap(True)
+
+        # Album art
+        self.album_art_label = QLabel()
+        self.album_art_label.setFixedSize(180, 180)
+        self.album_art_label.setAlignment(Qt.AlignCenter)
+        self.album_art_label.setScaledContents(True)
+        self.album_art_label.setVisible(False)
+
+        # Blanked lyric clue
+        self.clue_label = QLabel()
+        self.clue_label.setObjectName("clueText")
+        self.clue_label.setWordWrap(True)
+        self.clue_label.setAlignment(Qt.AlignCenter)
+
+        # Result feedback
+        self.result_label = QLabel()
+        self.result_label.setObjectName("resultText")
+        self.result_label.setAlignment(Qt.AlignCenter)
+        self.next_button = QPushButton("Next Round")
+        self.next_button.setObjectName("primaryButton")
+        self.next_button.clicked.connect(self.next_round)
+        self.next_button.setVisible(False)
+        self.change_source_button = QPushButton("Change Library / Playlist")
+        self.change_source_button.setObjectName("linkButton")
+        self.change_source_button.clicked.connect(self.change_source)
+
+        # Layout
+        stats = QHBoxLayout()
+        stats.addWidget(self.round_label)
+        stats.addStretch()
+        stats.addWidget(self.score_label)
+        stats.addWidget(self.streak_label)
+        stats.addWidget(self.timer_label)
+        stats.addWidget(self.sound_button)
+
+        clue_panel = QFrame()
+        clue_panel.setObjectName("cluePanel")
+        clue_layout = QVBoxLayout(clue_panel)
+        clue_layout.addWidget(self.song_label)
+        clue_layout.addWidget(self.album_art_label, alignment=Qt.AlignCenter)
+        clue_layout.addWidget(self.clue_label)
+
+        answers = QGridLayout()
+        for number in range(4):
+            button = QPushButton()
+            button.setObjectName("answerButton")
+            button.setMinimumHeight(64)
+            button.setProperty("state", "neutral")
+            button.clicked.connect(lambda checked=False, n=number: self.answer(n))
+            self.answer_buttons.append(button)
+            answers.addWidget(button, number // 2, number % 2)
+
+        powerups = QHBoxLayout()
+        powerups.addWidget(self.fifty_button)
+        powerups.addWidget(self.playback_toggle)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(32, 24, 32, 24)
+        layout.addLayout(stats)
+        layout.addLayout(powerups)
+        layout.addWidget(clue_panel)
+        layout.addLayout(answers)
+        layout.addWidget(self.result_label)
+        layout.addWidget(self.play_button)
+        layout.addWidget(self.next_button)
+        layout.addWidget(self.change_source_button)
+        self.show_round()
+
+    def show_round(self):
+        round_info = self.rounds[self.round_number]
+        song = self.songs[round_info['song_index']]
+        self.options, self.correct_option = build_fillin_options(round_info)
+        self.round_label.setText(f"ROUND {self.round_number + 1} / {len(self.rounds)}")
+        self.score_label.setText(f"SCORE {self.score}")
+        self.streak_label.setText(f"STREAK {self.streak}")
+        self.song_label.setText(f"{song.track_name} — {song.artist}")
+        self.clue_label.setText(f'"{round_info["blanked_line"]}"')
+        self.clue_label.setAlignment(
+            Qt.AlignRight if is_hebrew(round_info['blanked_line']) else Qt.AlignCenter
+        )
+        self.album_art_label.clear()
+        self.album_art_label.setVisible(False)
+        self.load_album_art(song.album_art_url)
+        self.result_label.clear()
+        self.next_button.setVisible(False)
+        self.play_button.setVisible(False)
+        self.answered_current_round = False
+
+        for button, word in zip(self.answer_buttons, self.options):
+            button.setText(word.upper())
+            button.setEnabled(True)
+            button.setProperty("state", "neutral")
+            button.style().unpolish(button)
+            button.style().polish(button)
+
+        self.elapsed_timer.start()
+        self.clock_timer.start(100)
+        self.update_clock()
+
+    @Slot()
+    def update_clock(self):
+        self.timer_label.setText(f"{self.elapsed_timer.elapsed() / 1000:.1f}s")
+
+    @Slot(int)
+    def answer(self, selected_index):
+        if self.answered_current_round:
+            return
+        if not self.answer_buttons[selected_index].isEnabled():
+            return
+        self.answered_current_round = True
+        self.answered_rounds += 1
+        elapsed = self.elapsed_timer.elapsed() / 1000
+        self.clock_timer.stop()
+        for button in self.answer_buttons:
+            button.setEnabled(False)
+
+        is_correct = selected_index + 1 == self.correct_option
+        round_info = self.rounds[self.round_number]
+        if is_correct:
+            self.streak += 1
+            self.correct_answers += 1
+            self.best_streak = max(self.best_streak, self.streak)
+            points = calculate_round_score(True, elapsed, self.streak)
+            self.score += points
+            self.sounds.play_streak() if self.streak >= 5 else self.sounds.play_correct()
+            self.answer_buttons[selected_index].setProperty("state", "correct")
+            self.result_label.setText(f"Correct!  +{points} points — the word was \"{round_info['target_word']}\"")
+        else:
+            self.streak = 0
+            self.sounds.play_wrong()
+            self.answer_buttons[selected_index].setProperty("state", "wrong")
+            self.answer_buttons[self.correct_option - 1].setProperty("state", "correct")
+            self.result_label.setText(f"Wrong! The answer was \"{round_info['target_word']}\"")
+
+        for button in self.answer_buttons:
+            button.style().unpolish(button)
+            button.style().polish(button)
+        self.score_label.setText(f"SCORE {self.score}")
+        self.streak_label.setText(f"STREAK {self.streak}")
+
+        self.play_button.setVisible(True)
+        if self.playback_enabled:
+            self.play_correct_song()
+        self.next_button.setText(
+            "Finish Game" if self.round_number + 1 == len(self.rounds) else "Next Question"
+        )
+        self.next_button.setVisible(True)
+
+    @Slot()
+    def use_fifty_fifty(self):
+        if self.used_fifty_fifty or self.answered_current_round:
+            return
+        self.used_fifty_fifty = True
+        self.fifty_button.setEnabled(False)
+        wrong_indices = [
+            index for index in range(4) if index != self.correct_option - 1
+        ]
+        for index in random.sample(wrong_indices, 2):
+            self.answer_buttons[index].setEnabled(False)
+            self.answer_buttons[index].setText("—")
+
+    def achievements(self):
+        earned = []
+        if self.correct_answers:
+            earned.append("First correct answer")
+        if self.best_streak >= 3:
+            earned.append("Three-answer streak")
+        if self.best_streak >= 5:
+            earned.append("Five-answer streak")
+        if self.answered_rounds and self.correct_answers == self.answered_rounds:
+            earned.append("Perfect run")
+        return earned
+
+    @Slot()
+    def toggle_sound(self):
+        enabled = self.sounds.toggle()
+        self.sound_button.setText("🔊 Sound On" if enabled else "🔇 Sound Off")
+
+    @Slot()
+    def toggle_playback(self):
+        self.playback_enabled = not self.playback_enabled
+        self.playback_toggle.setText(
+            "Spotify: On" if self.playback_enabled else "Spotify: Off"
+        )
+
+    @Slot()
+    def play_correct_song(self):
+        round_info = self.rounds[self.round_number]
+        song = self.songs[round_info['song_index']]
+        if not song.spotify_uri:
+            self.result_label.setText("This track cannot be played through Spotify.")
+            return
+        if self.playback_thread:
+            try:
+                if self.playback_thread.isRunning():
+                    return
+            except RuntimeError:
+                self.playback_thread = None
+                self.playback_worker = None
+        self.play_button.setEnabled(False)
+        self.play_button.setText("Connecting to Spotify...")
+        self.playback_thread = QThread(self)
+        self.playback_worker = PlaybackWorker(song.spotify_uri)
+        self.playback_worker.moveToThread(self.playback_thread)
+        self.playback_thread.started.connect(self.playback_worker.run)
+        self.playback_worker.finished.connect(self.playback_finished)
+        self.playback_worker.finished.connect(self.playback_thread.quit)
+        self.playback_thread.finished.connect(self.playback_thread_finished)
+        self.playback_thread.finished.connect(self.playback_worker.deleteLater)
+        self.playback_thread.finished.connect(self.playback_thread.deleteLater)
+        self.playback_thread.start()
+
+    @Slot(bool, str)
+    def playback_finished(self, success, message):
+        self.play_button.setEnabled(True)
+        self.play_button.setText("▶ Play Song")
+        if not success:
+            self.result_label.setText(f"Spotify playback unavailable: {message}")
+
+    @Slot()
+    def playback_thread_finished(self):
+        self.playback_thread = None
+        self.playback_worker = None
+
+    def load_album_art(self, image_url):
+        if not image_url:
+            return
+        if self.active_art_reply:
+            self.active_art_reply.abort()
+        self.active_art_reply = self.network_manager.get(QNetworkRequest(QUrl(image_url)))
+        self.active_art_reply.finished.connect(self.album_art_loaded)
+
+    @Slot()
+    def album_art_loaded(self):
+        reply = self.active_art_reply
+        self.active_art_reply = None
+        if not reply or reply.error():
+            return
+        pixmap = QPixmap()
+        if pixmap.loadFromData(reply.readAll()):
+            self.album_art_label.setPixmap(pixmap)
+            self.album_art_label.setVisible(True)
+        reply.deleteLater()
+
+    @Slot()
+    def next_round(self):
+        if self.round_number + 1 == len(self.rounds):
+            self.finished.emit({
+                'score': self.score,
+                'correct_answers': self.correct_answers,
+                'total_rounds': max(1, self.answered_rounds),
+                'best_streak': self.best_streak,
+                'language': self.language,
+                'difficulty': self.difficulty,
+                'mode': self.mode,
+                'achievements': self.achievements(),
+            })
+            return
+        self.round_number += 1
+        self.show_round()
+
+
 class ResultsWidget(QWidget):
     play_again = Signal()
     change_source = Signal()
@@ -999,7 +1328,10 @@ class MainWindow(QMainWindow):
     @Slot(object, str, str, str)
     def start_game(self, songs, language, difficulty, mode):
         try:
-            game = GameWidget(songs, language, difficulty, mode)
+            if mode == "fill_in":
+                game = FillInGameWidget(songs, language, difficulty)
+            else:
+                game = GameWidget(songs, language, difficulty, mode)
         except ValueError as error:
             QMessageBox.warning(self, "Unable to Start", str(error))
             return

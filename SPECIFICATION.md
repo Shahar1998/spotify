@@ -4,7 +4,7 @@
 
 SpotiWord is an interactive terminal trivia game based on a user's Spotify Liked Songs library. The game retrieves lyrics, identifies a signature word for a song, provides a lyric clue with the word hidden, and asks the player to select the matching song from four options.
 
-Current release: `0.3.0`. This document also describes unreleased v0.4 development features currently present in the working tree.
+Current release: `0.4.0`.
 
 ## 2. Technology and external services
 
@@ -61,7 +61,8 @@ The lyric client must:
 - Use a request timeout.
 - Retry temporary failures and rate limits.
 - Treat unavailable lyrics as a normal condition.
-- Cache successful and unavailable lookups locally in `.lyrics_cache.json`.
+- Cache successful lookups and confirmed not-found responses locally in the user's application-data directory.
+- Do not cache temporary request failures or retryable HTTP errors as missing lyrics; log failed lookups so users can distinguish service problems from unavailable lyrics.
 - Never allow a cache failure to stop the game.
 
 Tracks without genuine lyrics may be displayed as options, but they must not generate signature words.
@@ -90,6 +91,7 @@ If no suitable line is found, the game displays a generic hidden-word clue.
 
 - Classic mode contains up to five valid rounds.
 - Blitz mode starts with 60 seconds and presents valid rounds continuously until time expires.
+- Fill in the Blank mode shows a song and a lyric line with one word hidden; players select the missing word from four options, with decoys drawn from other songs in the active pool.
 - In Blitz mode, a correct answer adds four seconds and a wrong answer removes five seconds.
 - Each round has one correct track and three validated decoys.
 - Options are shuffled before display.
@@ -128,11 +130,11 @@ An incorrect answer gives zero points and resets the streak. Timing uses a monot
 - Pure logic should be testable without Spotify or LRCLIB network access.
 - New behavior should include automated tests.
 - Private files must remain excluded by `.gitignore`.
-- Release versions use Semantic Versioning and Git tags such as `v0.3.0`.
+- Release versions use Semantic Versioning and Git tags such as `v0.4.0`.
 
 ## 11. GUI requirements
 
-The GUI must keep Spotify, LRCLIB, playback, and album-art network work off the main UI thread. While loading, it must display progress, support cancellation, and remain responsive. The current GUI provides Liked Songs and playlist selection, selectable sampling size, loading cancellation, language and difficulty setup, Classic and Blitz gameplay, timer-based scoring, combo streaks, power-ups, achievements, correct/wrong answer colors, optional Spotify Connect playback, clickable Spotify links, asynchronous album-art reveal, Hebrew RTL layout, local SQLite high-score history, a dark theme, sound feedback with mute control, and a results screen while reusing the same game rules as the terminal version.
+The GUI must keep Spotify, LRCLIB, playback, and album-art network work off the main UI thread. While loading, it must display progress, support cancellation, and remain responsive. The current GUI provides Liked Songs and playlist selection, selectable sampling size, loading cancellation, language and difficulty setup, Classic, Blitz, and Fill in the Blank gameplay, timer-based scoring, combo streaks, power-ups, achievements, correct/wrong answer colors, optional Spotify Connect playback, clickable Spotify links, asynchronous album-art reveal, Hebrew RTL layout, local SQLite high-score history, a dark theme, sound feedback with mute control, and a results screen.
 
 ## 12. Planned improvements
 
@@ -148,4 +150,10 @@ The GUI must keep Spotify, LRCLIB, playback, and album-art network work off the 
 
 - First-run configuration assistance and packaged-app diagnostics.
 - Random library sampling and playlist selection.
+
+## 14. v0.4 completed work
+
+- Fill in the Blank gameplay and mode-specific GUI routing.
+- Avoid caching transient LRCLIB failures as unavailable lyrics, while retaining negative caching for confirmed not-found responses.
+- Align application, installer, and documentation versions at `0.4.0`.
 - Responsive PySide6 GUI and Windows installer pipeline.
