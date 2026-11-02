@@ -46,11 +46,15 @@ Spotify authentication is created by `create_spotify_client()` when the applicat
 
 1. Fetch up to `max_songs` saved tracks from Spotify.
 2. Ignore unavailable or deleted Spotify tracks.
-3. Preserve the original track name, primary artist, Spotify URL and URI, lyric text, and lyric availability flag.
+3. Preserve the original track name, primary artist, Spotify URL and URI, lyric text, lyric availability flag, optional genres, and album release year.
 4. Remove common feature and remix tags before querying LRCLIB.
 5. Classify a track as Hebrew when its track name or primary artist contains Hebrew Unicode characters. All other tracks are placed in the English pool.
 
 The loader first reads the total library size, samples random Spotify pages, deduplicates tracks, and then randomly selects up to the requested sample size. This avoids fetching every saved track solely to create a sample. Songs are represented as typed `Song` dataclasses throughout the application.
+
+After sampling, the loader requests artist metadata in batches and attaches available genres. Genre enrichment is best-effort; a Spotify metadata failure must not prevent the game from loading songs.
+
+The source selector also supports Spotify Catalog mode. Catalog mode searches Spotify with a genre query and optional release-year range, samples result pages, deduplicates tracks, and uses the same lyric retrieval and language categorization pipeline as library mode.
 
 ## 5. Lyric retrieval
 
@@ -92,6 +96,13 @@ If no suitable line is found, the game displays a generic hidden-word clue.
 - Classic mode contains up to five valid rounds.
 - Blitz mode starts with 60 seconds and presents valid rounds continuously until time expires.
 - Fill in the Blank mode shows a song and a lyric line with one word hidden; players select the missing word from four options, with decoys drawn from other songs in the active pool.
+- The setup screen can filter the selected library or playlist by broad genre and album release decade, such as Rock and 1990s.
+- The setup screen can select Spotify Catalog as a source and search it by broad genre and optional album release decade.
+- Language, genre, and decade are selected on the source screen exactly once; **All genres** and **All years** mean no restriction.
+- The post-loading game setup screen contains difficulty and game-mode choices only.
+- Genre and decade filters must be applied before round generation.
+- Missing genre or release-year metadata must not crash loading; those songs remain available when no filter is selected.
+- Catalog results must be sampled rather than attempting to retrieve the entire Spotify catalog.
 - In Blitz mode, a correct answer adds four seconds and a wrong answer removes five seconds.
 - Each round has one correct track and three validated decoys.
 - Options are shuffled before display.
@@ -143,6 +154,7 @@ The GUI must keep Spotify, LRCLIB, playback, and album-art network work off the 
 - Separate Spotify access, analysis, and terminal presentation into additional modules.
 - Add structured logging and a richer command-line interface.
 - Improve language detection beyond track and artist metadata.
+- Add a global Spotify catalog genre challenge separate from filtering the user's library.
 - Add code-signed Windows releases.
 - Add automated CI builds and GitHub Release uploads.
 

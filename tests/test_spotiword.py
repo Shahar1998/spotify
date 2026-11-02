@@ -6,6 +6,7 @@ from models import Song
 from core import (
     HEBREW_STOP_WORDS,
     build_fillin_options,
+    filter_songs,
     prepare_fillin_rounds,
     strip_hebrew_niqqud,
 )
@@ -316,8 +317,34 @@ def test_spotify_sources_include_liked_songs_and_playlists():
 
     sources = list_spotify_sources(FakeSpotifyClient())
 
-    assert sources[0] == {"id": None, "name": "Liked Songs", "kind": "liked"}
-    assert sources[1]["name"] == "Road Trip"
+    assert sources[0] == {"id": None, "name": "Spotify Catalog", "kind": "catalog"}
+    assert sources[1] == {"id": None, "name": "Liked Songs", "kind": "liked"}
+    assert sources[2]["name"] == "Road Trip"
+
+
+def test_catalog_source_searches_by_genre_and_decade(tmp_path, monkeypatch):
+    class FakeSpotifyClient:
+        def __init__(self):
+            self.search_calls = []
+
+        def search(self, **kwargs):
+            self.search_calls.append(kwargs)
+            if kwargs["limit"] == 1:
+                return {"tracks": {"total": 1, "items": []}}
+            return {"tracks": {"items": []}}
+
+    from spotify_service import load_and_categorize_songs
+
+    client = FakeSpotifyClient()
+    monkeypatch.setattr("spotify_service.enrich_track_metadata", lambda *args: None)
+    load_and_categorize_songs(
+        client,
+        max_songs=20,
+        source={"kind": "catalog", "genre": "Rock", "decade": 1990},
+    )
+
+    assert client.search_calls[0]["q"] == "genre:rock year:1990-1999"
+    assert all(call["limit"] <= 10 for call in client.search_calls)
 
 
 def test_start_track_playback_targets_active_device():
@@ -341,3 +368,15 @@ def test_start_track_playback_targets_active_device():
         "device_id": "active",
         "uris": ["spotify:track:example"],
     }
+
+
+def test_filter_songs_supports_genre_and_decade():
+    songs = [
+        Song("Rock 90s", "Band", "", "lyrics", True, genres=("album rock",), release_year=1995),
+        Song("Rock 00s", "Band", "", "lyrics", True, genres=("album rock",), release_year=2005),
+        Song("Pop 90s", "Singer", "", "lyrics", True, genres=("dance pop",), release_year=1995),
+    ]
+
+    filtered = filter_songs(songs, genre="Rock", decade=1990)
+
+    assert [song.track_name for song in filtered] == ["Rock 90s"]

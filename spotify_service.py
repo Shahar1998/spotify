@@ -1,4 +1,5 @@
 import math
+import logging
 import os
 import random
 import re
@@ -10,7 +11,7 @@ from spotipy.exceptions import SpotifyException
 from spotipy.oauth2 import SpotifyOAuth
 
 from config import ENV_PATH, SPOTIFY_CACHE_PATH
-from core import is_hebrew
+from core import GENRE_FILTERS, is_hebrew
 from lyrics_client import LyricsCache, fetch_lrclib_lyrics
 from models import Song
 
@@ -46,7 +47,10 @@ def create_spotify_client():
 
 def list_spotify_sources(spotify_client):
     """Return selectable Spotify libraries and playlists."""
-    sources = [{'id': None, 'name': 'Liked Songs', 'kind': 'liked'}]
+    sources = [
+        {'id': None, 'name': 'Spotify Catalog', 'kind': 'catalog'},
+        {'id': None, 'name': 'Liked Songs', 'kind': 'liked'},
+    ]
     results = spotify_client.current_user_playlists(limit=50)
     while results:
         for playlist in results.get('items', []):
@@ -62,6 +66,10 @@ def list_spotify_sources(spotify_client):
     return sources
 
 
+def _extract_track(item):
+    return item.get('track') or item
+
+
 def clean_track_name(name):
     name = re.sub(r'[\(\[]\s*(?:feat\.?|ft\.?|with)\b.*?[\)\]]', '', name, flags=re.IGNORECASE)
     name = re.sub(r'[\(\[]\s*remix\b.*?[\)\]]', '', name, flags=re.IGNORECASE)
@@ -70,12 +78,17 @@ def clean_track_name(name):
 
 
 def _build_song_entry(item, lyrics_cache=None):
-    track = item.get('track')
+    track = _extract_track(item)
     if not track or not track.get('artists'):
         return None
     original_name = track.get('name', '')
     artist_name = track['artists'][0].get('name', '')
     album_images = track.get('album', {}).get('images', [])
+    release_date = track.get('album', {}).get('release_date', '')
+    try:
+        release_year = int(release_date[:4])
+    except (TypeError, ValueError):
+        release_year = None
     lyrics = fetch_lrclib_lyrics(clean_track_name(original_name), artist_name, cache=lyrics_cache)
     has_real_lyrics = bool(lyrics)
     return Song(
@@ -86,7 +99,37 @@ def _build_song_entry(item, lyrics_cache=None):
         has_real_lyrics=has_real_lyrics,
         album_art_url=album_images[0].get('url') if album_images else None,
         spotify_uri=track.get('uri'),
+        genres=tuple(track.get('_spotiword_genres', ())),
+        release_year=release_year,
     ), is_hebrew(original_name) or is_hebrew(artist_name)
+
+
+def enrich_track_metadata(spotify_client, items):
+    """Attach optional artist genres to track items in batches."""
+    artist_ids = {
+        track['artists'][0].get('id')
+        for item in items
+        if (track := item.get('track'))
+        and track.get('artists')
+        and track['artists'][0].get('id')
+    }
+    genres_by_artist = {}
+    try:
+        artist_ids = list(artist_ids)
+        for start in range(0, len(artist_ids), 50):
+            response = spotify_client.artists(artist_ids[start:start + 50])
+            for artist in response.get('artists', []):
+                if artist and artist.get('id'):
+                    genres_by_artist[artist['id']] = tuple(artist.get('genres', ()))
+    except Exception:
+        logging.exception('Spotify genre metadata could not be loaded; continuing without genres')
+        return
+
+    for item in items:
+        track = _extract_track(item)
+        artists = track.get('artists') or []
+        artist_id = artists[0].get('id') if artists else None
+        track['_spotiword_genres'] = genres_by_artist.get(artist_id, ())
 
 
 def start_track_playback(spotify_client, spotify_uri):
@@ -123,29 +166,56 @@ def load_and_categorize_songs(
     source=None,
 ):
     source = source or {'id': None, 'kind': 'liked', 'name': 'Liked Songs'}
-    page_size = 50 if source['kind'] == 'liked' else 100
-    fetch_page = (
-        spotify_client.current_user_saved_tracks
-        if source['kind'] == 'liked'
-        else lambda **kwargs: spotify_client.playlist_items(source['id'], **kwargs)
-    )
-    metadata = fetch_page(limit=1, offset=0)
-    total_tracks = metadata.get('total', len(metadata.get('items', [])))
-    total_pages = max(1, math.ceil(total_tracks / page_size))
-    pages_needed = min(total_pages, max(1, math.ceil(max_songs / page_size) + 1))
-    selected_pages = random.sample(range(total_pages), pages_needed)
-    items = []
-    for page_number in selected_pages:
-        if cancel_callback and cancel_callback():
-            raise LoadingCancelled()
-        page = fetch_page(limit=page_size, offset=page_number * page_size)
-        items.extend(page.get('items', []))
+    if source['kind'] == 'catalog':
+        genre = source.get('genre')
+        query = ''
+        if genre:
+            genre_terms = GENRE_FILTERS.get(genre, (genre.casefold(),))
+            query = f"genre:{genre_terms[0]}"
+        decade = source.get('decade')
+        if decade is not None:
+            query = f"{query} year:{decade}-{decade + 9}".strip()
+        metadata = spotify_client.search(q=query, type='track', limit=1, offset=0)
+        track_results = metadata.get('tracks', metadata)
+        total_tracks = track_results.get('total', 0)
+        # Spotify Search currently accepts at most 10 results per request.
+        page_size = 10
+        total_pages = max(1, min(100, math.ceil(total_tracks / page_size)))
+        pages_needed = min(total_pages, max(1, math.ceil(max_songs / page_size) + 1))
+        selected_pages = random.sample(range(total_pages), pages_needed)
+        items = []
+        for page_number in selected_pages:
+            if cancel_callback and cancel_callback():
+                raise LoadingCancelled()
+            page = spotify_client.search(
+                q=query, type='track', limit=page_size, offset=page_number * page_size
+            )
+            items.extend(page.get('tracks', {}).get('items', []))
+    else:
+        page_size = 50 if source['kind'] == 'liked' else 100
+        fetch_page = (
+            spotify_client.current_user_saved_tracks
+            if source['kind'] == 'liked'
+            else lambda **kwargs: spotify_client.playlist_items(source['id'], **kwargs)
+        )
+        metadata = fetch_page(limit=1, offset=0)
+        total_tracks = metadata.get('total', len(metadata.get('items', [])))
+        total_pages = max(1, math.ceil(total_tracks / page_size))
+        pages_needed = min(total_pages, max(1, math.ceil(max_songs / page_size) + 1))
+        selected_pages = random.sample(range(total_pages), pages_needed)
+        items = []
+        for page_number in selected_pages:
+            if cancel_callback and cancel_callback():
+                raise LoadingCancelled()
+            page = fetch_page(limit=page_size, offset=page_number * page_size)
+            items.extend(page.get('items', []))
 
     unique_items = {}
     for item in items:
-        track = item.get('track') or {}
+        track = _extract_track(item)
         unique_items[track.get('id') or f"{track.get('name')}::{track.get('uri')}"] = item
     selected_items = random.sample(list(unique_items.values()), min(max_songs, len(unique_items)))
+    enrich_track_metadata(spotify_client, selected_items)
     if progress_callback:
         progress_callback(0, len(selected_items), f'Selected {len(selected_items)} random tracks')
 

@@ -7,6 +7,21 @@ from models import Song
 
 __version__ = "0.4.0"
 
+GENRE_FILTERS = {
+    'Rock': ('rock',),
+    'Pop': ('pop',),
+    'Hip-Hop': ('hip hop', 'hip-hop', 'rap'),
+    'R&B': ('r&b', 'soul', 'funk'),
+    'Electronic': ('electronic', 'house', 'techno', ' edm'),
+    'Jazz': ('jazz',),
+    'Classical': ('classical', 'orchestral'),
+    'Metal': ('metal',),
+    'Country': ('country',),
+    'Reggae': ('reggae',),
+    'Indie': ('indie',),
+    'Alternative': ('alternative',),
+}
+
 STOP_WORDS = {
     'the', 'a', 'an', 'and', 'in', 'on', 'at', 'to', 'for', 'of', 'with',
     'you', 'i', 'me', 'my', 'it', 'is', 'chorus', 'verse', 'embedding',
@@ -113,6 +128,26 @@ def prepare_game_rounds(songs, difficulty_level, max_rounds=5):
             })
 
     return random.sample(valid_rounds, min(max_rounds, len(valid_rounds)))
+
+
+def filter_songs(songs, genre=None, decade=None):
+    """Filter songs by broad genre and release decade without requiring metadata."""
+    genre_terms = GENRE_FILTERS.get(genre, ()) if genre else ()
+    filtered = []
+    for song in songs:
+        if genre_terms:
+            normalized_genres = [item.casefold() for item in song.genres]
+            if not any(
+                term in current_genre
+                for term in genre_terms
+                for current_genre in normalized_genres
+            ):
+                continue
+        if decade:
+            if song.release_year is None or song.release_year // 10 * 10 != decade:
+                continue
+        filtered.append(song)
+    return filtered
 
 
 def prepare_fillin_rounds(songs, difficulty_level, max_rounds=5):

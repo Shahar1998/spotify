@@ -53,11 +53,13 @@ To launch the GUI loading window:
 python gui_app.py
 ```
 
-The GUI provides a responsive library-loading screen, Liked Songs and playlist selection, selectable sample size, loading cancellation, language and difficulty setup, Classic five-round gameplay, Blitz 60-second gameplay, Fill in the Blank lyric rounds, a color-changing countdown bar, combo streak scoring, one-use power-ups, achievements, synthesized answer and streak sounds with a mute toggle, optional Spotify Connect playback after answers, timer-based scoring, answer-state colors, Spotify links, asynchronously loaded album artwork, RTL Hebrew support, local high-score history, and a results screen. Spotify and lyric loading run in the background so the window remains responsive. It uses a dark Spotify-inspired theme.
+The GUI provides a responsive loading screen with two source types: the user's library/playlists or the general Spotify Catalog. Language, genre, and release decade are selected once on the source screen, with **All genres** and **All years** available. Catalog games can be sampled by genre and decade. After loading, the user chooses only difficulty and game mode. The GUI also provides selectable sample size, loading cancellation, Classic five-round gameplay, Blitz 60-second gameplay, Fill in the Blank lyric rounds, a color-changing countdown bar, combo streak scoring, one-use power-ups, achievements, synthesized answer and streak sounds with a mute toggle, optional Spotify Connect playback after answers, timer-based scoring, answer-state colors, Spotify links, asynchronously loaded album artwork, RTL Hebrew support, local high-score history, and a results screen. Spotify and lyric loading run in the background so the window remains responsive. It uses a dark Spotify-inspired theme.
 
 After answering, **Play Correct Song** starts the correct track without advancing the round. **Next Question** advances when more rounds are available; **Finish Game** appears on the final valid round.
 
 The first GUI run provides a Spotify configuration dialog if credentials are missing. It may then open a browser for Spotify authorization. Playback control requires the `user-modify-playback-state` and `user-read-playback-state` scopes, a Spotify Premium account, and an available Spotify Connect device, so existing users may be asked to authorize SpotiWord again. Spotify authentication is created only when the application starts; importing the module does not trigger login. Runtime logs are stored in the user's SpotiWord application-data directory.
+
+Library genre and decade filters operate on the sampled songs in the selected library or playlist. Catalog mode searches Spotify directly using the selected genre and decade, samples result pages, and then retrieves lyrics for the selected tracks. Genre metadata is optional because Spotify may return empty or deprecated artist-genre data; tracks without genre metadata remain available under **All genres**. A catalog search can produce fewer playable songs when Spotify or LRCLIB returns too few matching tracks.
 
 ## Test
 
@@ -118,4 +120,4 @@ The project follows Semantic Versioning:
 MAJOR.MINOR.PATCH
 ```
 
-The current version is `0.4.0`, which adds Fill in the Blank gameplay and improves LRCLIB failure handling. Git release tags use the `v` prefix, for example `v0.4.0`.
+The current version is `0.4.0`, which adds Fill in the Blank gameplay, improves LRCLIB failure handling, and adds library genre/decade filtering. Git release tags use the `v` prefix, for example `v0.4.0`.

@@ -8,9 +8,11 @@ from threading import Event
 
 from core import (
     __version__,
+    GENRE_FILTERS,
     build_fillin_options,
     build_round_options,
     calculate_round_score,
+    filter_songs,
     is_hebrew,
     prepare_fillin_rounds,
     prepare_game_rounds,
@@ -38,7 +40,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
+from PySide6.QtGui import QDesktopServices, QFont, QIcon, QPixmap
 from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PySide6.QtWidgets import (
@@ -273,6 +275,17 @@ class SourceSetupWidget(QWidget):
         self.song_count.setSingleStep(10)
         self.song_count.setValue(100)
         self.song_count.setSuffix(" songs")
+        self.language_combo = QComboBox()
+        self.language_combo.addItem("English", "English")
+        self.language_combo.addItem("Hebrew", "Hebrew")
+        self.genre_combo = QComboBox()
+        self.genre_combo.addItem("All genres", None)
+        for genre in sorted(GENRE_FILTERS):
+            self.genre_combo.addItem(genre, genre)
+        self.decade_combo = QComboBox()
+        self.decade_combo.addItem("All years", None)
+        for decade in range(1960, 2030, 10):
+            self.decade_combo.addItem(f"{decade}s", decade)
         load_button = QPushButton("Load Selected Source")
         load_button.setObjectName("primaryButton")
         load_button.clicked.connect(self.start_loading)
@@ -287,6 +300,12 @@ class SourceSetupWidget(QWidget):
         panel_layout.addWidget(self.source_combo)
         panel_layout.addWidget(QLabel("Number of songs to sample"))
         panel_layout.addWidget(self.song_count)
+        panel_layout.addWidget(QLabel("Language"))
+        panel_layout.addWidget(self.language_combo)
+        panel_layout.addWidget(QLabel("Genre (optional)"))
+        panel_layout.addWidget(self.genre_combo)
+        panel_layout.addWidget(QLabel("Release decade (optional)"))
+        panel_layout.addWidget(self.decade_combo)
         panel_layout.addSpacing(12)
         panel_layout.addWidget(load_button)
 
@@ -295,29 +314,30 @@ class SourceSetupWidget(QWidget):
         layout.addStretch()
         layout.addWidget(panel)
         layout.addStretch()
-
     @Slot()
     def start_loading(self):
-        self.load_source.emit(self.song_count.value(), self.source_combo.currentData())
+        source = dict(self.source_combo.currentData())
+        source['genre'] = self.genre_combo.currentData()
+        source['decade'] = self.decade_combo.currentData()
+        source['language'] = self.language_combo.currentData()
+        self.load_source.emit(self.song_count.value(), source)
 
 
 class SetupWidget(QWidget):
     start_game = Signal(object, str, str, str)
     change_source = Signal()
 
-    def __init__(self, english_songs, hebrew_songs):
+    def __init__(self, english_songs, hebrew_songs, language="English"):
         super().__init__()
         self.english_songs = english_songs
         self.hebrew_songs = hebrew_songs
+        self.language = language
 
         title = QLabel("Ready for your next round?")
         title.setObjectName("pageTitle")
         subtitle = QLabel("Choose a language and difficulty to begin.")
         subtitle.setObjectName("mutedText")
 
-        self.language_combo = QComboBox()
-        self.language_combo.addItem("English Songs", "English")
-        self.language_combo.addItem("Hebrew Songs", "Hebrew")
         self.difficulty_combo = QComboBox()
         self.difficulty_combo.addItem("Easy - signature words", "easy")
         self.difficulty_combo.addItem("Hard - deeper cuts", "hard")
@@ -338,8 +358,6 @@ class SetupWidget(QWidget):
         card_layout.addWidget(title)
         card_layout.addWidget(subtitle)
         card_layout.addSpacing(16)
-        card_layout.addWidget(QLabel("Language"))
-        card_layout.addWidget(self.language_combo)
         card_layout.addWidget(QLabel("Difficulty"))
         card_layout.addWidget(self.difficulty_combo)
         card_layout.addWidget(QLabel("Game mode"))
@@ -356,9 +374,9 @@ class SetupWidget(QWidget):
 
     @Slot()
     def start(self):
-        language = self.language_combo.currentData()
         difficulty = self.difficulty_combo.currentData()
         mode = self.mode_combo.currentData()
+        language = self.language
         songs = self.hebrew_songs if language == "Hebrew" else self.english_songs
         self.start_game.emit(songs, language, difficulty, mode)
 
@@ -1175,6 +1193,7 @@ class MainWindow(QMainWindow):
         self.english_songs = None
         self.hebrew_songs = None
         self.sources = []
+        self.selected_source = None
         self.setWindowTitle(f"SpotiWord v{__version__}")
         icon_path = resource_directory() / "assets" / "spotiword.svg"
         if icon_path.exists():
@@ -1248,6 +1267,18 @@ class MainWindow(QMainWindow):
 
     @Slot(object, object)
     def loading_finished(self, english_songs, hebrew_songs):
+        source = self.selected_source or {}
+        if source.get('kind') != 'catalog':
+            english_songs = filter_songs(
+                english_songs,
+                genre=source.get('genre'),
+                decade=source.get('decade'),
+            )
+            hebrew_songs = filter_songs(
+                hebrew_songs,
+                genre=source.get('genre'),
+                decade=source.get('decade'),
+            )
         self.english_songs = english_songs
         self.hebrew_songs = hebrew_songs
         self.show_setup()
@@ -1286,6 +1317,7 @@ class MainWindow(QMainWindow):
 
     @Slot(int, object)
     def load_selected_source(self, max_songs, source):
+        self.selected_source = source
         self.show_loading_screen()
         self.start_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
@@ -1315,7 +1347,8 @@ class MainWindow(QMainWindow):
         self.status_label.setText("Loading cancelled.")
 
     def show_setup(self):
-        setup = SetupWidget(self.english_songs, self.hebrew_songs)
+        language = (self.selected_source or {}).get('language', 'English')
+        setup = SetupWidget(self.english_songs, self.hebrew_songs, language)
         setup.start_game.connect(self.start_game)
         setup.change_source.connect(lambda: self.show_source_setup(self.sources))
         self.setCentralWidget(setup)
@@ -1363,6 +1396,7 @@ class MainWindow(QMainWindow):
 def main():
     configure_logging()
     app = QApplication(sys.argv)
+    app.setFont(QFont("Segoe UI", 10))
     app.setStyleSheet(
         """
         QWidget { background: #121212; color: #f5f5f5; font-size: 14px; }

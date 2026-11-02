@@ -48,6 +48,36 @@ def test_setup_can_select_blitz_mode(qt_app, songs):
     assert received[0][3] == "blitz"
 
 
+def test_game_setup_does_not_repeat_source_filters(qt_app, songs):
+    setup = SetupWidget(songs, songs)
+
+    assert not hasattr(setup, "genre_combo")
+    assert not hasattr(setup, "decade_combo")
+
+
+def test_source_setup_exposes_catalog_filters(qt_app):
+    from gui_app import SourceSetupWidget
+
+    setup = SourceSetupWidget([
+        {"id": None, "name": "Spotify Catalog", "kind": "catalog"},
+        {"id": None, "name": "Liked Songs", "kind": "liked"},
+    ])
+
+    assert not setup.genre_combo.isHidden()
+    assert setup.decade_combo.findData(1990) >= 0
+    assert setup.language_combo.currentData() == "English"
+
+    setup.genre_combo.setCurrentIndex(setup.genre_combo.findData("Rock"))
+    setup.decade_combo.setCurrentIndex(setup.decade_combo.findData(1990))
+    received = []
+    setup.load_source.connect(lambda count, source: received.append((count, source)))
+    setup.start_loading()
+
+    assert received[0][1]["genre"] == "Rock"
+    assert received[0][1]["decade"] == 1990
+    assert received[0][1]["language"] == "English"
+
+
 def test_main_window_starts_fill_in_widget_for_fill_in_mode(qt_app, songs):
     window = MainWindow()
 
