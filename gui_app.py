@@ -298,7 +298,7 @@ class SourceSetupWidget(QWidget):
         panel_layout.addSpacing(16)
         panel_layout.addWidget(QLabel("Library or playlist"))
         panel_layout.addWidget(self.source_combo)
-        panel_layout.addWidget(QLabel("Number of songs to sample"))
+        panel_layout.addWidget(QLabel("Playable song pool size"))
         panel_layout.addWidget(self.song_count)
         panel_layout.addWidget(QLabel("Language"))
         panel_layout.addWidget(self.language_combo)

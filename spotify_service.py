@@ -158,6 +158,108 @@ def start_track_playback(spotify_client, spotify_uri):
         raise RuntimeError(f"Spotify playback failed ({error.http_status}).") from error
 
 
+def _catalog_queries(source):
+    query_parts = []
+    genre = source.get('genre')
+    if genre:
+        terms = GENRE_FILTERS.get(genre, (genre.casefold(),))
+        query_parts.append(f"genre:{terms[0]}")
+    decade = source.get('decade')
+    if decade is not None:
+        query_parts.append(f"year:{decade}-{decade + 9}")
+    base_query = ' '.join(query_parts)
+    if source.get('language') == 'Hebrew':
+        # Spotify has no reliable language search filter. These metadata hints
+        # improve recall before the exact Hebrew title/artist check below.
+        seeds = ('עברית', 'ישראלי', 'מזרחית', 'מוזיקה', 'שיר', 'א', 'ה')
+        return [f"{base_query} {seed}".strip() for seed in seeds]
+    # Spotify requires a non-empty query. This broad fallback is used only
+    # when the player chooses All genres and All years.
+    return [base_query or 'a']
+
+
+def _load_catalog_songs(
+    spotify_client,
+    source,
+    max_songs,
+    progress_callback=None,
+    cancel_callback=None,
+):
+    """Build a final playable pool from Spotify catalog search results."""
+    page_size = 10  # Spotify Search currently caps this endpoint at 10.
+    search_plan = []
+    for query in _catalog_queries(source):
+        metadata = spotify_client.search(q=query, type='track', limit=1, offset=0)
+        track_results = metadata.get('tracks', metadata)
+        total_tracks = track_results.get('total', 0)
+        total_pages = min(100, math.ceil(total_tracks / page_size))
+        if total_pages:
+            pages = random.sample(range(total_pages), min(20, total_pages))
+            search_plan.extend((query, page) for page in pages)
+    random.shuffle(search_plan)
+    if not search_plan:
+        return [], []
+
+    language = source.get('language', 'English')
+    seen_ids = set()
+    playable = []
+    lyrics_cache = LyricsCache()
+    try:
+        for query, page_number in search_plan[:100]:
+            if cancel_callback and cancel_callback():
+                raise LoadingCancelled()
+            page = spotify_client.search(
+                q=query,
+                type='track',
+                limit=page_size,
+                offset=page_number * page_size,
+            )
+            candidates = []
+            for item in page.get('tracks', {}).get('items', []):
+                track = _extract_track(item)
+                track_id = track.get('id') or track.get('uri')
+                if not track_id or track_id in seen_ids:
+                    continue
+                seen_ids.add(track_id)
+                artists = track.get('artists') or []
+                artist_name = artists[0].get('name', '') if artists else ''
+                text = f"{track.get('name', '')} {artist_name}"
+                matches_language = is_hebrew(text) if language == 'Hebrew' else not is_hebrew(text)
+                if matches_language:
+                    candidates.append(item)
+
+            if candidates:
+                with ThreadPoolExecutor(max_workers=8) as executor:
+                    futures = [
+                        executor.submit(_build_song_entry, item, lyrics_cache)
+                        for item in candidates
+                    ]
+                    for future in as_completed(futures):
+                        if cancel_callback and cancel_callback():
+                            for pending in futures:
+                                pending.cancel()
+                            raise LoadingCancelled()
+                        result = future.result()
+                        if result and result[0].has_real_lyrics:
+                            playable.append(result[0])
+                            if progress_callback:
+                                progress_callback(
+                                    min(len(playable), max_songs),
+                                    max_songs,
+                                    f'Catalog playable songs: {min(len(playable), max_songs)}/{max_songs}',
+                                )
+                            if len(playable) >= max_songs:
+                                break
+                if len(playable) >= max_songs:
+                    break
+    finally:
+        lyrics_cache.flush()
+
+    if language == 'Hebrew':
+        return [], playable[:max_songs]
+    return playable[:max_songs], []
+
+
 def load_and_categorize_songs(
     spotify_client,
     max_songs=100,
@@ -167,30 +269,13 @@ def load_and_categorize_songs(
 ):
     source = source or {'id': None, 'kind': 'liked', 'name': 'Liked Songs'}
     if source['kind'] == 'catalog':
-        genre = source.get('genre')
-        query = ''
-        if genre:
-            genre_terms = GENRE_FILTERS.get(genre, (genre.casefold(),))
-            query = f"genre:{genre_terms[0]}"
-        decade = source.get('decade')
-        if decade is not None:
-            query = f"{query} year:{decade}-{decade + 9}".strip()
-        metadata = spotify_client.search(q=query, type='track', limit=1, offset=0)
-        track_results = metadata.get('tracks', metadata)
-        total_tracks = track_results.get('total', 0)
-        # Spotify Search currently accepts at most 10 results per request.
-        page_size = 10
-        total_pages = max(1, min(100, math.ceil(total_tracks / page_size)))
-        pages_needed = min(total_pages, max(1, math.ceil(max_songs / page_size) + 1))
-        selected_pages = random.sample(range(total_pages), pages_needed)
-        items = []
-        for page_number in selected_pages:
-            if cancel_callback and cancel_callback():
-                raise LoadingCancelled()
-            page = spotify_client.search(
-                q=query, type='track', limit=page_size, offset=page_number * page_size
-            )
-            items.extend(page.get('tracks', {}).get('items', []))
+        return _load_catalog_songs(
+            spotify_client,
+            source,
+            max_songs,
+            progress_callback=progress_callback,
+            cancel_callback=cancel_callback,
+        )
     else:
         page_size = 50 if source['kind'] == 'liked' else 100
         fetch_page = (

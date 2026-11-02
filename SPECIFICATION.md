@@ -103,6 +103,9 @@ If no suitable line is found, the game displays a generic hidden-word clue.
 - Genre and decade filters must be applied before round generation.
 - Missing genre or release-year metadata must not crash loading; those songs remain available when no filter is selected.
 - Catalog results must be sampled rather than attempting to retrieve the entire Spotify catalog.
+- For Catalog mode, the requested count means the final playable pool size, not merely the number of initial search candidates.
+- Catalog loading must stop safely when the requested pool is reached, searchable pages are exhausted, or the user cancels loading.
+- Hebrew Catalog mode should use multiple Hebrew metadata search hints because Spotify does not expose a reliable language filter.
 - In Blitz mode, a correct answer adds four seconds and a wrong answer removes five seconds.
 - Each round has one correct track and three validated decoys.
 - Options are shuffled before display.

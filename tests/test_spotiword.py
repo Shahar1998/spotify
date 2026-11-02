@@ -347,6 +347,15 @@ def test_catalog_source_searches_by_genre_and_decade(tmp_path, monkeypatch):
     assert all(call["limit"] <= 10 for call in client.search_calls)
 
 
+def test_hebrew_catalog_uses_multiple_language_search_hints():
+    from spotify_service import _catalog_queries
+
+    queries = _catalog_queries({"language": "Hebrew", "genre": None, "decade": None})
+
+    assert "עברית" in queries[0]
+    assert len(queries) >= 5
+
+
 def test_start_track_playback_targets_active_device():
     class FakeSpotifyClient:
         def __init__(self):
