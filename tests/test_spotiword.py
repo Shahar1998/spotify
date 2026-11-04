@@ -356,6 +356,203 @@ def test_hebrew_catalog_uses_multiple_language_search_hints():
     assert len(queries) >= 5
 
 
+def test_catalog_fills_pool_across_pages_without_lyrics_or_duplicate_tracks(monkeypatch):
+    from spotify_service import load_and_categorize_songs
+
+    def track(track_id, name):
+        return {
+            "id": track_id,
+            "name": name,
+            "artists": [{"name": "Artist"}],
+        }
+
+    class FakeSpotifyClient:
+        def __init__(self):
+            self.page_offsets = []
+            self.page_limits = []
+
+        def search(self, **kwargs):
+            if kwargs["limit"] == 1:
+                return {"tracks": {"total": 11}}
+            self.page_offsets.append(kwargs["offset"])
+            self.page_limits.append(kwargs["limit"])
+            items = {
+                0: [track("missing", "No Lyrics"), track("one", "First")],
+                10: [track("one", "First"), track("two", "Second")],
+            }
+            return {"tracks": {"items": items.get(kwargs["offset"], [])}}
+
+    built_ids = []
+
+    def build_entry(item, cache):
+        song = item.get("track") or item
+        built_ids.append(song["id"])
+        if song["id"] == "missing":
+            return Song(song["name"], "Artist", "", "", False), False
+        return Song(song["name"], "Artist", "", "real lyrics", True), False
+
+    class FakeLyricsCache:
+        def flush(self):
+            pass
+
+    monkeypatch.setattr("spotify_service._build_song_entry", build_entry)
+    monkeypatch.setattr("spotify_service.LyricsCache", FakeLyricsCache)
+    monkeypatch.setattr("spotify_service.random.shuffle", lambda pages: None)
+    client = FakeSpotifyClient()
+
+    english, hebrew = load_and_categorize_songs(
+        client,
+        max_songs=3,
+        source={"kind": "catalog", "language": "English"},
+    )
+
+    assert [song.track_name for song in english] == ["First", "Second"]
+    assert hebrew == []
+    assert built_ids.count("one") == 1
+    assert set(client.page_offsets) == {0, 10}
+    assert client.page_limits == [10, 10]
+
+
+def test_catalog_search_is_bounded_and_respects_spotify_offset_limit(monkeypatch):
+    from spotify_service import load_and_categorize_songs
+
+    class FakeSpotifyClient:
+        def __init__(self):
+            self.page_offsets = []
+
+        def search(self, **kwargs):
+            if kwargs["limit"] == 1:
+                return {"tracks": {"total": 10_000}}
+            offset = kwargs["offset"]
+            self.page_offsets.append(offset)
+            return {"tracks": {"items": []}}
+
+    class FakeLyricsCache:
+        def flush(self):
+            pass
+
+    monkeypatch.setattr("spotify_service.LyricsCache", FakeLyricsCache)
+    monkeypatch.setattr("spotify_service.random.shuffle", lambda pages: None)
+    client = FakeSpotifyClient()
+
+    load_and_categorize_songs(
+        client,
+        max_songs=100,
+        source={"kind": "catalog", "language": "English"},
+    )
+
+    assert len(client.page_offsets) == 20
+    assert all(offset <= 1000 for offset in client.page_offsets)
+    assert len(set(client.page_offsets)) == 20
+
+
+def test_hebrew_catalog_sample_is_shared_across_search_hints(monkeypatch):
+    from spotify_service import _catalog_queries, load_and_categorize_songs
+
+    class FakeSpotifyClient:
+        def __init__(self):
+            self.page_queries = []
+
+        def search(self, **kwargs):
+            if kwargs["limit"] == 1:
+                return {"tracks": {"total": 500}}
+            self.page_queries.append(kwargs["q"])
+            return {"tracks": {"items": []}}
+
+    class FakeLyricsCache:
+        def flush(self):
+            pass
+
+    monkeypatch.setattr("spotify_service.LyricsCache", FakeLyricsCache)
+    monkeypatch.setattr("spotify_service.random.shuffle", lambda pages: None)
+    client = FakeSpotifyClient()
+    queries = _catalog_queries({"language": "Hebrew"})
+
+    load_and_categorize_songs(
+        client,
+        max_songs=100,
+        source={"kind": "catalog", "language": "Hebrew"},
+    )
+
+    assert len(client.page_queries) == 20
+    assert set(client.page_queries) == set(queries[:20])
+
+
+def test_catalog_cancellation_stops_before_next_page(monkeypatch):
+    from spotify_service import LoadingCancelled, load_and_categorize_songs
+
+    class FakeSpotifyClient:
+        def __init__(self):
+            self.page_offsets = []
+
+        def search(self, **kwargs):
+            if kwargs["limit"] == 1:
+                return {"tracks": {"total": 11}}
+            self.page_offsets.append(kwargs["offset"])
+            return {"tracks": {"items": []}}
+
+    class FakeLyricsCache:
+        def flush(self):
+            pass
+
+    monkeypatch.setattr("spotify_service.random.shuffle", lambda pages: None)
+    monkeypatch.setattr("spotify_service.LyricsCache", FakeLyricsCache)
+    client = FakeSpotifyClient()
+
+    with pytest.raises(LoadingCancelled):
+        load_and_categorize_songs(
+            client,
+            max_songs=1,
+            cancel_callback=lambda: len(client.page_offsets) >= 1,
+            source={"kind": "catalog", "language": "English"},
+        )
+
+    assert client.page_offsets == [0]
+
+
+@pytest.mark.parametrize(
+    ("language", "track_name"),
+    [("English", "English Song"), ("Hebrew", "שיר בעברית")],
+)
+def test_catalog_filters_tracks_for_selected_language(
+    language, track_name, monkeypatch
+):
+    from spotify_service import load_and_categorize_songs
+
+    class FakeSpotifyClient:
+        def search(self, **kwargs):
+            if kwargs["limit"] == 1:
+                return {"tracks": {"total": 1}}
+            return {"tracks": {"items": [{
+                "id": "selected-language",
+                "name": track_name,
+                "artists": [{"name": "Artist"}],
+            }]}}
+
+    class FakeLyricsCache:
+        def flush(self):
+            pass
+
+    monkeypatch.setattr(
+        "spotify_service._build_song_entry",
+        lambda item, cache: (
+            Song(track_name, "Artist", "", "lyrics", True),
+            language == "Hebrew",
+        ),
+    )
+    monkeypatch.setattr("spotify_service.LyricsCache", FakeLyricsCache)
+    monkeypatch.setattr("spotify_service.random.shuffle", lambda pages: None)
+
+    english, hebrew = load_and_categorize_songs(
+        FakeSpotifyClient(),
+        max_songs=1,
+        source={"kind": "catalog", "language": language},
+    )
+
+    assert len(english) == (language == "English")
+    assert len(hebrew) == (language == "Hebrew")
+
+
 def test_start_track_playback_targets_active_device():
     class FakeSpotifyClient:
         def __init__(self):

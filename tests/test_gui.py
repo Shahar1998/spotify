@@ -8,7 +8,14 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication, QLabel
 
-from gui_app import FillInGameWidget, GameWidget, MainWindow, ResultsWidget, SetupWidget
+from gui_app import (
+    FillInGameWidget,
+    GameWidget,
+    LibraryLoader,
+    MainWindow,
+    ResultsWidget,
+    SetupWidget,
+)
 from models import Song
 
 
@@ -53,6 +60,58 @@ def test_game_setup_does_not_repeat_source_filters(qt_app, songs):
 
     assert not hasattr(setup, "genre_combo")
     assert not hasattr(setup, "decade_combo")
+
+
+def test_catalog_pool_shortfall_is_displayed(qt_app, songs):
+    notice = MainWindow._catalog_pool_notice(
+        {"kind": "catalog", "language": "English"},
+        songs,
+        [],
+        100,
+    )
+    setup = SetupWidget(songs, [], pool_notice=notice)
+
+    assert any(
+        "4 playable songs out of 100 requested within the 20-page search sample"
+        in label.text()
+        for label in setup.findChildren(QLabel)
+    )
+
+
+def test_library_loader_prints_filters_counts_and_elapsed_time(
+    monkeypatch, capsys
+):
+    song = Song(
+        "Rock Song",
+        "Artist",
+        "",
+        "lyrics",
+        True,
+        genres=("rock",),
+        release_year=1995,
+    )
+    monkeypatch.setattr("gui_app.create_spotify_client", lambda: object())
+    monkeypatch.setattr(
+        "gui_app.load_and_categorize_songs",
+        lambda *args, **kwargs: ([song], []),
+    )
+    times = iter((10.0, 12.5))
+    monkeypatch.setattr("gui_app.perf_counter", lambda: next(times))
+    loader = LibraryLoader(
+        20,
+        {
+            "kind": "playlist",
+            "genre": "Rock",
+            "decade": 1990,
+            "language": "English",
+        },
+    )
+
+    loader.run()
+    output = capsys.readouterr().out
+
+    assert "source=playlist language=English genre=Rock decade=1990s requested=20" in output
+    assert "loaded=1 (English=1 Hebrew=0) elapsed=2.50s" in output
 
 
 def test_source_setup_exposes_catalog_filters(qt_app):

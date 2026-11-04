@@ -102,9 +102,10 @@ If no suitable line is found, the game displays a generic hidden-word clue.
 - The post-loading game setup screen contains difficulty and game-mode choices only.
 - Genre and decade filters must be applied before round generation.
 - Missing genre or release-year metadata must not crash loading; those songs remain available when no filter is selected.
-- Catalog results must be sampled rather than attempting to retrieve the entire Spotify catalog.
+- Catalog results must be sampled rather than attempting to retrieve the entire Spotify catalog. Request no more than 10 tracks per page and do not request offsets above 1000. Limit each load to a randomized sample of at most 20 pages across all search hints to keep loading responsive.
 - For Catalog mode, the requested count means the final playable pool size, not merely the number of initial search candidates.
-- Catalog loading must stop safely when the requested pool is reached, searchable pages are exhausted, or the user cancels loading.
+- Catalog loading must stop safely when the requested pool is reached, the bounded page sample is processed, or the user cancels loading.
+- Duplicate tracks and tracks without lyrics do not count toward the playable pool. If the bounded sample yields fewer songs than requested, the GUI must report the achieved and requested counts and suggest changing filters or lowering the requested size.
 - Hebrew Catalog mode should use multiple Hebrew metadata search hints because Spotify does not expose a reliable language filter.
 - In Blitz mode, a correct answer adds four seconds and a wrong answer removes five seconds.
 - Each round has one correct track and three validated decoys.
@@ -141,6 +142,7 @@ An incorrect answer gives zero points and resets the streak. Timing uses a monot
 ## 10. Quality requirements
 
 - Network failures must be handled without exposing credentials or crashing unexpectedly.
+- When launched from a terminal, song loading must print its source type, language, selected genre and decade, requested pool size, loaded song counts, and elapsed duration. The diagnostic output must not include credentials or track names.
 - Pure logic should be testable without Spotify or LRCLIB network access.
 - New behavior should include automated tests.
 - Private files must remain excluded by `.gitignore`.

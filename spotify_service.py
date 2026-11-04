@@ -18,6 +18,10 @@ from models import Song
 
 dotenv.load_dotenv(ENV_PATH)
 
+SPOTIFY_SEARCH_PAGE_SIZE = 10
+SPOTIFY_SEARCH_MAX_OFFSET = 1000
+SPOTIFY_CATALOG_PAGE_BUDGET = 20
+
 
 class LoadingCancelled(Exception):
     """Raised when the user cancels library loading."""
@@ -185,18 +189,39 @@ def _load_catalog_songs(
     progress_callback=None,
     cancel_callback=None,
 ):
-    """Build a final playable pool from Spotify catalog search results."""
-    page_size = 10  # Spotify Search currently caps this endpoint at 10.
-    search_plan = []
-    for query in _catalog_queries(source):
+    """Build a playable pool from a bounded sample of Spotify search pages."""
+    page_size = SPOTIFY_SEARCH_PAGE_SIZE
+    max_pages = SPOTIFY_SEARCH_MAX_OFFSET // page_size + 1
+    query_pages = []
+    queries = _catalog_queries(source)
+    for query_number, query in enumerate(queries, 1):
+        if cancel_callback and cancel_callback():
+            raise LoadingCancelled()
         metadata = spotify_client.search(q=query, type='track', limit=1, offset=0)
-        track_results = metadata.get('tracks', metadata)
-        total_tracks = track_results.get('total', 0)
-        total_pages = min(100, math.ceil(total_tracks / page_size))
-        if total_pages:
-            pages = random.sample(range(total_pages), min(20, total_pages))
-            search_plan.extend((query, page) for page in pages)
-    random.shuffle(search_plan)
+        track_results = metadata.get('tracks', metadata) or {}
+        total_tracks = track_results.get('total') or 0
+        total_pages = min(math.ceil(total_tracks / page_size), max_pages)
+        pages = list(range(total_pages))
+        random.shuffle(pages)
+        query_pages.append((query, pages))
+        if progress_callback:
+            progress_callback(
+                0,
+                max_songs,
+                f'Preparing catalog search hints: {query_number}/{len(queries)}',
+            )
+
+    search_plan = []
+    while len(search_plan) < SPOTIFY_CATALOG_PAGE_BUDGET:
+        added_page = False
+        for query, pages in query_pages:
+            if pages:
+                search_plan.append((query, pages.pop(0)))
+                added_page = True
+                if len(search_plan) >= SPOTIFY_CATALOG_PAGE_BUDGET:
+                    break
+        if not added_page:
+            break
     if not search_plan:
         return [], []
 
@@ -205,7 +230,7 @@ def _load_catalog_songs(
     playable = []
     lyrics_cache = LyricsCache()
     try:
-        for query, page_number in search_plan[:100]:
+        for checked_pages, (query, page_number) in enumerate(search_plan, 1):
             if cancel_callback and cancel_callback():
                 raise LoadingCancelled()
             page = spotify_client.search(
@@ -214,9 +239,12 @@ def _load_catalog_songs(
                 limit=page_size,
                 offset=page_number * page_size,
             )
+            track_results = page.get('tracks') or {}
             candidates = []
-            for item in page.get('tracks', {}).get('items', []):
+            for item in track_results.get('items') or []:
                 track = _extract_track(item)
+                if not track or not track.get('artists'):
+                    continue
                 track_id = track.get('id') or track.get('uri')
                 if not track_id or track_id in seen_ids:
                     continue
@@ -228,11 +256,13 @@ def _load_catalog_songs(
                 if matches_language:
                     candidates.append(item)
 
-            if candidates:
+            for start in range(0, len(candidates), 8):
+                if cancel_callback and cancel_callback():
+                    raise LoadingCancelled()
                 with ThreadPoolExecutor(max_workers=8) as executor:
                     futures = [
                         executor.submit(_build_song_entry, item, lyrics_cache)
-                        for item in candidates
+                        for item in candidates[start:start + 8]
                     ]
                     for future in as_completed(futures):
                         if cancel_callback and cancel_callback():
@@ -250,7 +280,15 @@ def _load_catalog_songs(
                                 )
                             if len(playable) >= max_songs:
                                 break
-                if len(playable) >= max_songs:
+            if progress_callback:
+                progress_callback(
+                    min(len(playable), max_songs),
+                    max_songs,
+                    f'Catalog search: checked {checked_pages}/{len(search_plan)} '
+                    f'sampled pages; playable songs: '
+                    f'{min(len(playable), max_songs)}/{max_songs}',
+                )
+            if len(playable) >= max_songs:
                     break
     finally:
         lyrics_cache.flush()

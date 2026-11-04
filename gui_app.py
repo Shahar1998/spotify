@@ -5,6 +5,7 @@ import random
 import struct
 from pathlib import Path
 from threading import Event
+from time import perf_counter
 
 from core import (
     __version__,
@@ -12,8 +13,8 @@ from core import (
     build_fillin_options,
     build_round_options,
     calculate_round_score,
-    filter_songs,
     is_hebrew,
+    filter_songs,
     prepare_fillin_rounds,
     prepare_game_rounds,
 )
@@ -164,19 +165,61 @@ class LibraryLoader(QObject):
 
     @Slot()
     def run(self):
+        started_at = perf_counter()
+        source_kind = self.source.get('kind', 'liked')
+        language = self.source.get('language', 'All')
+        genre = self.source.get('genre') or 'All'
+        decade = self.source.get('decade')
+        decade_label = f'{decade}s' if decade is not None else 'All'
+        load_context = (
+            f"source={source_kind} language={language} genre={genre} "
+            f"decade={decade_label} requested={self.max_songs}"
+        )
+        print(f"[SpotiWord] Song loading started: {load_context}", flush=True)
         try:
             client = create_spotify_client()
-            result = load_and_categorize_songs(
+            english_songs, hebrew_songs = load_and_categorize_songs(
                 client,
                 max_songs=self.max_songs,
                 progress_callback=self.progress.emit,
                 cancel_callback=self.cancel_requested.is_set,
                 source=self.source,
             )
-            self.finished.emit(*result)
+            if source_kind != 'catalog':
+                english_songs = filter_songs(
+                    english_songs,
+                    genre=self.source.get('genre'),
+                    decade=decade,
+                )
+                hebrew_songs = filter_songs(
+                    hebrew_songs,
+                    genre=self.source.get('genre'),
+                    decade=decade,
+                )
+            elapsed = perf_counter() - started_at
+            print(
+                f"[SpotiWord] Song loading completed: {load_context} "
+                f"loaded={len(english_songs) + len(hebrew_songs)} "
+                f"(English={len(english_songs)} Hebrew={len(hebrew_songs)}) "
+                f"elapsed={elapsed:.2f}s",
+                flush=True,
+            )
+            self.finished.emit(english_songs, hebrew_songs)
         except LoadingCancelled:
+            elapsed = perf_counter() - started_at
+            print(
+                f"[SpotiWord] Song loading cancelled: {load_context} "
+                f"elapsed={elapsed:.2f}s",
+                flush=True,
+            )
             self.cancelled.emit()
         except Exception as error:
+            elapsed = perf_counter() - started_at
+            print(
+                f"[SpotiWord] Song loading failed: {load_context} "
+                f"error={type(error).__name__} elapsed={elapsed:.2f}s",
+                flush=True,
+            )
             logging.exception("Spotify library loading failed")
             self.failed.emit(str(error))
 
@@ -327,7 +370,13 @@ class SetupWidget(QWidget):
     start_game = Signal(object, str, str, str)
     change_source = Signal()
 
-    def __init__(self, english_songs, hebrew_songs, language="English"):
+    def __init__(
+        self,
+        english_songs,
+        hebrew_songs,
+        language="English",
+        pool_notice=None,
+    ):
         super().__init__()
         self.english_songs = english_songs
         self.hebrew_songs = hebrew_songs
@@ -357,6 +406,11 @@ class SetupWidget(QWidget):
         card_layout = QVBoxLayout(card)
         card_layout.addWidget(title)
         card_layout.addWidget(subtitle)
+        if pool_notice:
+            notice = QLabel(pool_notice)
+            notice.setObjectName("warningText")
+            notice.setWordWrap(True)
+            card_layout.addWidget(notice)
         card_layout.addSpacing(16)
         card_layout.addWidget(QLabel("Difficulty"))
         card_layout.addWidget(self.difficulty_combo)
@@ -1184,6 +1238,20 @@ class ResultsWidget(QWidget):
 
 
 class MainWindow(QMainWindow):
+    @staticmethod
+    def _catalog_pool_notice(source, english_songs, hebrew_songs, requested):
+        if source.get('kind') != 'catalog':
+            return None
+        language = source.get('language', 'English')
+        available = len(hebrew_songs if language == 'Hebrew' else english_songs)
+        if available >= requested:
+            return None
+        return (
+            f"Catalog found {available} playable songs out of "
+            f"{requested} requested within the 20-page search sample. "
+            "Try broader filters or request a smaller pool."
+        )
+
     def __init__(self):
         super().__init__()
         self.thread = None
@@ -1194,6 +1262,7 @@ class MainWindow(QMainWindow):
         self.hebrew_songs = None
         self.sources = []
         self.selected_source = None
+        self.requested_pool_size = 100
         self.setWindowTitle(f"SpotiWord v{__version__}")
         icon_path = resource_directory() / "assets" / "spotiword.svg"
         if icon_path.exists():
@@ -1267,21 +1336,16 @@ class MainWindow(QMainWindow):
 
     @Slot(object, object)
     def loading_finished(self, english_songs, hebrew_songs):
-        source = self.selected_source or {}
-        if source.get('kind') != 'catalog':
-            english_songs = filter_songs(
-                english_songs,
-                genre=source.get('genre'),
-                decade=source.get('decade'),
-            )
-            hebrew_songs = filter_songs(
-                hebrew_songs,
-                genre=source.get('genre'),
-                decade=source.get('decade'),
-            )
         self.english_songs = english_songs
         self.hebrew_songs = hebrew_songs
-        self.show_setup()
+        source = self.selected_source or {}
+        pool_notice = self._catalog_pool_notice(
+            source,
+            english_songs,
+            hebrew_songs,
+            self.requested_pool_size,
+        )
+        self.show_setup(pool_notice)
 
     @Slot(object)
     def sources_loaded(self, sources):
@@ -1318,6 +1382,7 @@ class MainWindow(QMainWindow):
     @Slot(int, object)
     def load_selected_source(self, max_songs, source):
         self.selected_source = source
+        self.requested_pool_size = max_songs
         self.show_loading_screen()
         self.start_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
@@ -1346,9 +1411,14 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(False)
         self.status_label.setText("Loading cancelled.")
 
-    def show_setup(self):
+    def show_setup(self, pool_notice=None):
         language = (self.selected_source or {}).get('language', 'English')
-        setup = SetupWidget(self.english_songs, self.hebrew_songs, language)
+        setup = SetupWidget(
+            self.english_songs,
+            self.hebrew_songs,
+            language,
+            pool_notice=pool_notice,
+        )
         setup.start_game.connect(self.start_game)
         setup.change_source.connect(lambda: self.show_source_setup(self.sources))
         self.setCentralWidget(setup)
