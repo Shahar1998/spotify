@@ -12,6 +12,7 @@ from core import (
     get_decoy_indices,
     get_lyric_snippet_clue,
     get_stop_words,
+    is_arabic,
     is_hebrew,
     prepare_game_rounds,
     strip_hebrew_niqqud,

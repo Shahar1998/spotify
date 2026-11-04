@@ -7,6 +7,7 @@ from core import (
     HEBREW_STOP_WORDS,
     build_fillin_options,
     filter_songs,
+    is_arabic,
     prepare_fillin_rounds,
     strip_hebrew_niqqud,
 )
@@ -46,12 +47,18 @@ def test_is_hebrew_detects_hebrew_text():
     assert is_hebrew("Hello world") is False
 
 
-def test_get_lyric_snippet_clue_blanks_target_word():
+def test_is_arabic_detects_arabic_script_without_matching_other_languages():
+    assert is_arabic("أغنية عربية") is True
+    assert is_arabic("Hello world") is False
+    assert is_arabic("שלום עולם") is False
+
+
+def test_get_lyric_snippet_clue_shows_complete_line():
     lyrics = "First line\nThis is the signature word in this line\nLast line"
 
     clue = get_lyric_snippet_clue(lyrics, "signature")
 
-    assert clue == 'Line Clue: "This is the ____ word in this line"'
+    assert clue == 'Line Clue: "This is the signature word in this line"'
 
 
 def test_word_matching_does_not_match_substrings():
@@ -59,7 +66,13 @@ def test_word_matching_does_not_match_substrings():
 
     clue = get_lyric_snippet_clue("The party starts\nThe art is here", "art")
 
-    assert clue == 'Line Clue: "The ____ is here"'
+    assert clue == 'Line Clue: "The art is here"'
+
+
+def test_get_lyric_snippet_clue_includes_target_in_short_line():
+    clue = get_lyric_snippet_clue("art!", "art")
+
+    assert clue == 'Line Clue: "art!"'
 
 
 def test_create_spotify_client_reports_missing_configuration(monkeypatch):
@@ -551,6 +564,83 @@ def test_catalog_filters_tracks_for_selected_language(
 
     assert len(english) == (language == "English")
     assert len(hebrew) == (language == "Hebrew")
+
+
+def test_english_catalog_excludes_arabic_titles_and_artists(monkeypatch):
+    from spotify_service import load_and_categorize_songs
+
+    arabic_tracks = [
+        {
+            "id": "arabic-title",
+            "name": "أغنية جميلة",
+            "artists": [{"name": "Artist"}],
+        },
+        {
+            "id": "arabic-artist",
+            "name": "English title",
+            "artists": [{"name": "فنان"}],
+        },
+    ]
+
+    class FakeSpotifyClient:
+        def search(self, **kwargs):
+            if kwargs["limit"] == 1:
+                return {"tracks": {"total": len(arabic_tracks)}}
+            return {"tracks": {"items": arabic_tracks}}
+
+    class FakeLyricsCache:
+        def flush(self):
+            pass
+
+    lyric_lookups = []
+    monkeypatch.setattr(
+        "spotify_service._build_song_entry",
+        lambda item, cache: lyric_lookups.append(item),
+    )
+    monkeypatch.setattr("spotify_service.LyricsCache", FakeLyricsCache)
+    monkeypatch.setattr("spotify_service.random.shuffle", lambda pages: None)
+
+    english, hebrew = load_and_categorize_songs(
+        FakeSpotifyClient(),
+        max_songs=10,
+        source={"kind": "catalog", "language": "English"},
+    )
+
+    assert english == []
+    assert hebrew == []
+    assert lyric_lookups == []
+
+
+def test_library_song_builder_skips_arabic_script_before_lyric_lookup(monkeypatch):
+    from spotify_service import _build_song_entry
+
+    def unexpected_lyric_lookup(*args, **kwargs):
+        pytest.fail("Arabic-script tracks should be filtered before lyric lookup")
+
+    monkeypatch.setattr("spotify_service.fetch_lrclib_lyrics", unexpected_lyric_lookup)
+
+    result = _build_song_entry({
+        "name": "English title",
+        "artists": [{"name": "فنان"}],
+    })
+
+    assert result is None
+
+
+def test_library_song_builder_skips_arabic_lyrics(monkeypatch):
+    from spotify_service import _build_song_entry
+
+    monkeypatch.setattr(
+        "spotify_service.fetch_lrclib_lyrics",
+        lambda *args, **kwargs: "هذه كلمات عربية",
+    )
+
+    result = _build_song_entry({
+        "name": "Transliterated Title",
+        "artists": [{"name": "Artist"}],
+    })
+
+    assert result is None
 
 
 def test_start_track_playback_targets_active_device():

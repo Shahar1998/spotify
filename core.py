@@ -41,6 +41,15 @@ def is_hebrew(text):
     return bool(re.search(r'[\u0590-\u05FF]', text))
 
 
+def is_arabic(text):
+    return bool(
+        re.search(
+            r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]',
+            text,
+        )
+    )
+
+
 def strip_hebrew_niqqud(text):
     return re.sub(r'[\u0591-\u05C7]', '', text)
 
@@ -74,9 +83,9 @@ def get_lyric_snippet_clue(lyrics_text, target_word):
     )
     for line in lines:
         cleaned_line = line.strip()
-        if pattern.search(cleaned_line) and len(cleaned_line) > 10:
-            return f'Line Clue: "{pattern.sub("____", cleaned_line)}"'
-    return "Line Clue: Contains the word '____'"
+        if pattern.search(cleaned_line):
+            return f'Line Clue: "{cleaned_line}"'
+    return f"Line Clue: Contains the word '{target_word}'"
 
 
 def get_decoy_indices(songs, target_word):

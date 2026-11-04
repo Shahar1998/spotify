@@ -48,7 +48,7 @@ Spotify authentication is created by `create_spotify_client()` when the applicat
 2. Ignore unavailable or deleted Spotify tracks.
 3. Preserve the original track name, primary artist, Spotify URL and URI, lyric text, lyric availability flag, optional genres, and album release year.
 4. Remove common feature and remix tags before querying LRCLIB.
-5. Classify a track as Hebrew when its track name or primary artist contains Hebrew Unicode characters. All other tracks are placed in the English pool.
+5. Classify a track as Hebrew when its track name or primary artist contains Hebrew Unicode characters. Exclude Arabic-script titles, primary artists, or fetched lyrics from both the English and Hebrew pools; do not treat every non-Hebrew track as English.
 
 The loader first reads the total library size, samples random Spotify pages, deduplicates tracks, and then randomly selects up to the requested sample size. This avoids fetching every saved track solely to create a sample. Songs are represented as typed `Song` dataclasses throughout the application.
 
@@ -87,7 +87,7 @@ Signature-word rules:
 
 ## 7. Clue generation
 
-The game searches lyric lines for the first line containing the target word. It replaces the complete target word with `____` and displays the resulting line as the clue.
+The game searches lyric lines for the first line containing the target word and displays the complete line, including the target word, as the clue. Fill in the Blank mode separately hides a lyric word as part of its gameplay.
 
 If no suitable line is found, the game displays a generic hidden-word clue.
 

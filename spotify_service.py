@@ -11,7 +11,7 @@ from spotipy.exceptions import SpotifyException
 from spotipy.oauth2 import SpotifyOAuth
 
 from config import ENV_PATH, SPOTIFY_CACHE_PATH
-from core import GENRE_FILTERS, is_hebrew
+from core import GENRE_FILTERS, is_arabic, is_hebrew
 from lyrics_client import LyricsCache, fetch_lrclib_lyrics
 from models import Song
 
@@ -87,6 +87,8 @@ def _build_song_entry(item, lyrics_cache=None):
         return None
     original_name = track.get('name', '')
     artist_name = track['artists'][0].get('name', '')
+    if is_arabic(f'{original_name} {artist_name}'):
+        return None
     album_images = track.get('album', {}).get('images', [])
     release_date = track.get('album', {}).get('release_date', '')
     try:
@@ -94,6 +96,8 @@ def _build_song_entry(item, lyrics_cache=None):
     except (TypeError, ValueError):
         release_year = None
     lyrics = fetch_lrclib_lyrics(clean_track_name(original_name), artist_name, cache=lyrics_cache)
+    if lyrics and is_arabic(lyrics):
+        return None
     has_real_lyrics = bool(lyrics)
     return Song(
         track_name=original_name,
@@ -252,7 +256,11 @@ def _load_catalog_songs(
                 artists = track.get('artists') or []
                 artist_name = artists[0].get('name', '') if artists else ''
                 text = f"{track.get('name', '')} {artist_name}"
-                matches_language = is_hebrew(text) if language == 'Hebrew' else not is_hebrew(text)
+                matches_language = (
+                    is_hebrew(text) and not is_arabic(text)
+                    if language == 'Hebrew'
+                    else not is_hebrew(text) and not is_arabic(text)
+                )
                 if matches_language:
                     candidates.append(item)
 

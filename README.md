@@ -1,6 +1,6 @@
 # SpotiWord
 
-SpotiWord is a lyric trivia game with both terminal and desktop GUI modes. It uses songs saved in a user's Spotify library, retrieves lyrics from LRCLIB, identifies signature words, and creates multiple-choice rounds.
+SpotiWord is a lyric trivia game with both terminal and desktop GUI modes. It uses songs saved in a user's Spotify library, retrieves lyrics from LRCLIB, identifies signature words, and creates multiple-choice rounds. In song-guessing rounds, the lyric clue displays the complete matching line, including the signature word. Language filtering supports English and Hebrew; Arabic-script track metadata and lyrics are excluded instead of being treated as English.
 
 Current version: **0.4.0**
 
