@@ -5,7 +5,7 @@ from collections import Counter
 from models import Song
 
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 GENRE_FILTERS = {
     'Rock': ('rock',),

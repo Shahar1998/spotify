@@ -2,7 +2,7 @@
 
 SpotiWord is a lyric trivia game with both terminal and desktop GUI modes. It uses songs saved in a user's Spotify library, retrieves lyrics from LRCLIB, identifies signature words, and creates multiple-choice rounds. In song-guessing rounds, the complete matching lyric line appears in green in the question headline, aligned left-to-right for English or right-to-left for Hebrew. Language filtering supports English and Hebrew; confidently detected non-English lyrics are excluded from English, while tracks identified as Hebrew by their title or artist remain in the Hebrew pool even if their lyrics contain Arabic script.
 
-Current version: **0.4.0**
+Current version: **0.4.1**
 
 ## Requirements
 
@@ -120,4 +120,4 @@ The project follows Semantic Versioning:
 MAJOR.MINOR.PATCH
 ```
 
-The current version is `0.4.0`, which adds Fill in the Blank gameplay, improves LRCLIB failure handling, and adds library genre/decade filtering. Git release tags use the `v` prefix, for example `v0.4.0`.
+The current version is `0.4.1`, which improves Spotify Catalog discovery, Hebrew filtering, and lyric/game loading reliability. Git release tags use the `v` prefix, for example `v0.4.1`.

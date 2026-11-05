@@ -4,7 +4,7 @@
 
 SpotiWord is an interactive trivia game based on a user's Spotify Liked Songs library. The game retrieves lyrics, identifies a signature word for a song, displays its complete lyric line in the question headline with that word highlighted, and asks the player to select the matching song from four options.
 
-Current release: `0.4.0`.
+Current release: `0.4.1`.
 
 ## 2. Technology and external services
 
@@ -146,7 +146,7 @@ An incorrect answer gives zero points and resets the streak. Timing uses a monot
 - Pure logic should be testable without Spotify or LRCLIB network access.
 - New behavior should include automated tests.
 - Private files must remain excluded by `.gitignore`.
-- Release versions use Semantic Versioning and Git tags such as `v0.4.0`.
+- Release versions use Semantic Versioning and Git tags such as `v0.4.1`.
 
 ## 11. GUI requirements
 
@@ -172,5 +172,5 @@ The GUI must keep Spotify, LRCLIB, playback, and album-art network work off the 
 
 - Fill in the Blank gameplay and mode-specific GUI routing.
 - Avoid caching transient LRCLIB failures as unavailable lyrics, while retaining negative caching for confirmed not-found responses.
-- Align application, installer, and documentation versions at `0.4.0`.
+- Align application, installer, and documentation versions at `0.4.1`.
 - Responsive PySide6 GUI and Windows installer pipeline.
