@@ -1,4 +1,3 @@
-import html
 import sys
 import logging
 import math
@@ -61,6 +60,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -437,10 +437,6 @@ class SetupWidget(QWidget):
         self.start_game.emit(songs, language, difficulty, mode)
 
 
-def _format_headline_html(clue, target_word):
-    return f'<span style="color: #1ed760;">{html.escape(clue)}</span>'
-
-
 class GameWidget(QWidget):
     finished = Signal(object)
     change_source = Signal()
@@ -517,12 +513,20 @@ class GameWidget(QWidget):
         self.headline_label = QLabel()
         self.headline_label.setObjectName("questionHeadline")
         self.headline_label.setWordWrap(True)
-        self.headline_label.setTextFormat(Qt.RichText)
+        self.headline_label.setTextFormat(Qt.PlainText)
+        self.headline_label.setSizePolicy(
+            QSizePolicy.Expanding,
+            QSizePolicy.Preferred,
+        )
         self.headline_label.setLayoutDirection(
             Qt.RightToLeft if language == "Hebrew" else Qt.LeftToRight
         )
         self.headline_label.setAlignment(
-            Qt.AlignRight if language == "Hebrew" else Qt.AlignLeft
+            (
+                Qt.AlignRight | Qt.AlignAbsolute
+                if language == "Hebrew"
+                else Qt.AlignLeft | Qt.AlignAbsolute
+            )
         )
         self.album_art_label = QLabel()
         self.album_art_label.setFixedSize(250, 250)
@@ -597,9 +601,7 @@ class GameWidget(QWidget):
         self.round_label.setText(f"ROUND {self.round_number + 1} / {len(self.rounds)}")
         self.score_label.setText(f"SCORE {self.score}")
         self.streak_label.setText(f"STREAK {self.streak}")
-        self.headline_label.setText(
-            _format_headline_html(round_info['clue'], round_info['target_word'])
-        )
+        self.headline_label.setText(round_info['clue'])
         self.album_art_label.clear()
         self.album_art_label.setVisible(False)
         self.result_label.clear()
@@ -1481,7 +1483,7 @@ def main():
         QLabel#brand { color: #1ed760; font-size: 24px; font-weight: 700; }
         QLabel#pageTitle { font-size: 28px; font-weight: 700; }
         QLabel#mutedText { color: #a7a7a7; }
-        QLabel#questionHeadline { color: #ffffff; font-size: 30px; font-weight: 700; padding: 14px; }
+        QLabel#questionHeadline { color: #1ed760; font-size: 30px; font-weight: 700; padding: 14px; }
         QLabel#clueText { color: #ffffff; font-size: 18px; padding: 14px; }
         QLabel#resultText { color: #1ed760; font-size: 17px; font-weight: 700; }
         QLabel#finalScore { color: #1ed760; font-size: 64px; font-weight: 800; }

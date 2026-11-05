@@ -17,7 +17,6 @@ from gui_app import (
     SetupWidget,
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QTextDocument
 from PySide6.QtWidgets import QApplication, QLabel
 from models import Song
 
@@ -152,15 +151,11 @@ def test_game_disables_answers_and_updates_score(qt_app, songs):
     game = GameWidget(songs, "English", "easy")
 
     round_info = game.rounds[game.round_number]
-    rendered_headline = QTextDocument()
-    rendered_headline.setHtml(game.headline_label.text())
 
     assert game.headline_label.wordWrap()
     assert "Line Clue" not in game.headline_label.text()
-    assert round_info["clue"] in rendered_headline.toPlainText()
-    assert game.headline_label.text() == (
-        f'<span style="color: #1ed760;">{round_info["clue"]}</span>'
-    )
+    assert game.headline_label.text() == round_info["clue"]
+    assert game.headline_label.textFormat() == Qt.PlainText
     assert game.headline_label.alignment() & Qt.AlignLeft
     assert game.headline_label.layoutDirection() == Qt.LeftToRight
 
@@ -172,10 +167,41 @@ def test_game_disables_answers_and_updates_score(qt_app, songs):
 
 
 def test_hebrew_game_headline_uses_right_to_left_layout(qt_app, songs):
-    game = GameWidget(songs, "Hebrew", "easy")
+    hebrew_songs = [
+        Song(
+            f"שיר {index}",
+            "אמן",
+            "",
+            f"אהבה אהבה אהבה מנגינה{chr(0x05D0 + index)}",
+            True,
+        )
+        for index in range(4)
+    ]
+    game = GameWidget(hebrew_songs, "Hebrew", "easy")
+    game.headline_label.setStyleSheet("color: #1ed760;")
+    game.resize(1000, 700)
+    game.show()
+    qt_app.processEvents()
 
+    assert game.headline_label.text().startswith("אהבה אהבה אהבה מנגינה")
+    assert game.headline_label.textFormat() == Qt.PlainText
     assert game.headline_label.alignment() & Qt.AlignRight
+    assert game.headline_label.alignment() & Qt.AlignAbsolute
     assert game.headline_label.layoutDirection() == Qt.RightToLeft
+    assert game.headline_label.width() >= game.headline_label.parentWidget().width() - 40
+    headline_image = game.headline_label.grab().toImage()
+    green_text_x = [
+        x
+        for y in range(headline_image.height())
+        for x in range(headline_image.width())
+        if (
+            (color := headline_image.pixelColor(x, y)).green() > 150
+            and color.red() < 80
+            and color.blue() < 150
+        )
+    ]
+    assert green_text_x
+    assert min(green_text_x) > headline_image.width() // 3
 
 
 def test_blitz_game_shows_countdown_bar(qt_app, songs):
