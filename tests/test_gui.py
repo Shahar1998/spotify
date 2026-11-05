@@ -1,12 +1,12 @@
 import os
+from importlib.util import find_spec
 
 import pytest
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-pytest.importorskip("PySide6")
-
-from PySide6.QtWidgets import QApplication, QLabel
+if find_spec("PySide6") is None:
+    pytest.skip("PySide6 is not installed", allow_module_level=True)
 
 from gui_app import (
     FillInGameWidget,
@@ -16,6 +16,9 @@ from gui_app import (
     ResultsWidget,
     SetupWidget,
 )
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QTextDocument
+from PySide6.QtWidgets import QApplication, QLabel
 from models import Song
 
 
@@ -148,11 +151,31 @@ def test_main_window_starts_fill_in_widget_for_fill_in_mode(qt_app, songs):
 def test_game_disables_answers_and_updates_score(qt_app, songs):
     game = GameWidget(songs, "English", "easy")
 
+    round_info = game.rounds[game.round_number]
+    rendered_headline = QTextDocument()
+    rendered_headline.setHtml(game.headline_label.text())
+
+    assert game.headline_label.wordWrap()
+    assert "Line Clue" not in game.headline_label.text()
+    assert round_info["clue"] in rendered_headline.toPlainText()
+    assert game.headline_label.text() == (
+        f'<span style="color: #1ed760;">{round_info["clue"]}</span>'
+    )
+    assert game.headline_label.alignment() & Qt.AlignLeft
+    assert game.headline_label.layoutDirection() == Qt.LeftToRight
+
     game.answer(0)
 
     assert all(not button.isEnabled() for button in game.answer_buttons)
     assert not game.next_button.isHidden()
     assert game.score >= 0
+
+
+def test_hebrew_game_headline_uses_right_to_left_layout(qt_app, songs):
+    game = GameWidget(songs, "Hebrew", "easy")
+
+    assert game.headline_label.alignment() & Qt.AlignRight
+    assert game.headline_label.layoutDirection() == Qt.RightToLeft
 
 
 def test_blitz_game_shows_countdown_bar(qt_app, songs):

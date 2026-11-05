@@ -58,7 +58,7 @@ def test_get_lyric_snippet_clue_shows_complete_line():
 
     clue = get_lyric_snippet_clue(lyrics, "signature")
 
-    assert clue == 'Line Clue: "This is the signature word in this line"'
+    assert clue == "This is the signature word in this line"
 
 
 def test_word_matching_does_not_match_substrings():
@@ -66,13 +66,13 @@ def test_word_matching_does_not_match_substrings():
 
     clue = get_lyric_snippet_clue("The party starts\nThe art is here", "art")
 
-    assert clue == 'Line Clue: "The art is here"'
+    assert clue == "The art is here"
 
 
 def test_get_lyric_snippet_clue_includes_target_in_short_line():
     clue = get_lyric_snippet_clue("art!", "art")
 
-    assert clue == 'Line Clue: "art!"'
+    assert clue == "art!"
 
 
 def test_create_spotify_client_reports_missing_configuration(monkeypatch):
@@ -131,6 +131,32 @@ def test_prepare_game_rounds_and_options_are_playable():
     assert len(rounds) == 4
     assert len(options) == 4
     assert 1 <= correct_option <= 4
+
+
+def test_hebrew_rounds_fall_back_when_most_common_word_is_too_common():
+    alphabet = "אבגדהוזחטיכלמנסעפצקרשת"
+
+    def unique_word(index):
+        first = alphabet[index // len(alphabet)]
+        second = alphabet[index % len(alphabet)]
+        return f"מנגינה{first}{second}"
+
+    songs = [
+        Song(
+            f"Track {index}",
+            "Artist",
+            "",
+            f"אהבה אהבה אהבה {unique_word(index)}",
+            True,
+        )
+        for index in range(40)
+    ]
+
+    rounds = prepare_game_rounds(songs, "easy", max_rounds=5)
+
+    assert len(rounds) == 5
+    assert all(round_info["target_word"].startswith("מנגינה") for round_info in rounds)
+    assert len({round_info["correct_idx"] for round_info in rounds}) == 5
 
 
 def test_prepare_fillin_rounds_create_four_word_options():
@@ -641,6 +667,114 @@ def test_library_song_builder_skips_arabic_lyrics(monkeypatch):
     })
 
     assert result is None
+
+
+@pytest.mark.parametrize(
+    ("track_name", "artist_name"),
+    [
+        ("Песня на русском", "Artist"),
+        ("中文歌曲", "Artist"),
+    ],
+)
+def test_library_song_builder_skips_non_latin_track_metadata(
+    monkeypatch, track_name, artist_name
+):
+    from spotify_service import _build_song_entry
+
+    def unexpected_lyric_lookup(*args, **kwargs):
+        pytest.fail("Non-Latin tracks should be filtered before lyric lookup")
+
+    monkeypatch.setattr("spotify_service.fetch_lrclib_lyrics", unexpected_lyric_lookup)
+
+    result = _build_song_entry({
+        "name": track_name,
+        "artists": [{"name": artist_name}],
+    })
+
+    assert result is None
+
+
+@pytest.mark.parametrize(
+    "lyrics",
+    [
+        "Я хочу снять всю одежду с тебя, и мы будем танцевать всю ночь",
+        "Le pedí a Dios por tus labios, por tu forma de mirar y de vivir",
+        "今天的天气很好我们一起去公园散步然后晚上吃饭听音乐",
+    ],
+)
+def test_library_song_builder_skips_confidently_non_english_lyrics(
+    monkeypatch, lyrics
+):
+    from spotify_service import _build_song_entry
+
+    monkeypatch.setattr(
+        "spotify_service.fetch_lrclib_lyrics",
+        lambda *args, **kwargs: lyrics,
+    )
+
+    result = _build_song_entry({
+        "name": "English-looking title",
+        "artists": [{"name": "English-looking artist"}],
+    })
+
+    assert result is None
+
+
+def test_library_song_builder_keeps_english_lyrics(monkeypatch):
+    from spotify_service import _build_song_entry
+
+    monkeypatch.setattr(
+        "spotify_service.fetch_lrclib_lyrics",
+        lambda *args, **kwargs: (
+            "I want to dance with somebody, I want to feel the heat with somebody "
+            "yeah I want to dance with somebody"
+        ),
+    )
+
+    result = _build_song_entry({
+        "name": "English song",
+        "artists": [{"name": "English artist"}],
+    })
+
+    assert result is not None
+    assert result[1] is False
+
+
+def test_hebrew_playlist_keeps_hebrew_track_with_arabic_script_lyrics(monkeypatch):
+    from spotify_service import load_and_categorize_songs
+
+    playlist_track = {
+        "id": "hebrew-track",
+        "name": "שיר בעברית",
+        "artists": [{"name": "Artist"}],
+    }
+
+    class FakeSpotifyClient:
+        def playlist_items(self, playlist_id, **kwargs):
+            return {
+                "total": 1,
+                "items": [{"track": playlist_track}],
+            }
+
+    class FakeLyricsCache:
+        def flush(self):
+            pass
+
+    monkeypatch.setattr("spotify_service.enrich_track_metadata", lambda *args: None)
+    monkeypatch.setattr("spotify_service.LyricsCache", FakeLyricsCache)
+    monkeypatch.setattr(
+        "spotify_service.fetch_lrclib_lyrics",
+        lambda *args, **kwargs: "هذه كلمات عربية",
+    )
+
+    english, hebrew = load_and_categorize_songs(
+        FakeSpotifyClient(),
+        max_songs=100,
+        source={"kind": "playlist", "id": "playlist-id"},
+    )
+
+    assert english == []
+    assert [song.track_name for song in hebrew] == ["שיר בעברית"]
 
 
 def test_start_track_playback_targets_active_device():

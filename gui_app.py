@@ -1,7 +1,9 @@
+import html
 import sys
 import logging
 import math
 import random
+import re
 import struct
 from pathlib import Path
 from threading import Event
@@ -435,6 +437,10 @@ class SetupWidget(QWidget):
         self.start_game.emit(songs, language, difficulty, mode)
 
 
+def _format_headline_html(clue, target_word):
+    return f'<span style="color: #1ed760;">{html.escape(clue)}</span>'
+
+
 class GameWidget(QWidget):
     finished = Signal(object)
     change_source = Signal()
@@ -508,12 +514,16 @@ class GameWidget(QWidget):
         self.time_bar.setValue(self.blitz_total_ms)
         self.time_bar.setTextVisible(False)
         self.time_bar.setVisible(mode == "blitz")
-        self.word_label = QLabel()
-        self.word_label.setObjectName("signatureWord")
-        self.clue_label = QLabel()
-        self.clue_label.setObjectName("clueText")
-        self.clue_label.setWordWrap(True)
-        self.clue_label.setAlignment(Qt.AlignCenter)
+        self.headline_label = QLabel()
+        self.headline_label.setObjectName("questionHeadline")
+        self.headline_label.setWordWrap(True)
+        self.headline_label.setTextFormat(Qt.RichText)
+        self.headline_label.setLayoutDirection(
+            Qt.RightToLeft if language == "Hebrew" else Qt.LeftToRight
+        )
+        self.headline_label.setAlignment(
+            Qt.AlignRight if language == "Hebrew" else Qt.AlignLeft
+        )
         self.album_art_label = QLabel()
         self.album_art_label.setFixedSize(250, 250)
         self.album_art_label.setAlignment(Qt.AlignCenter)
@@ -541,8 +551,7 @@ class GameWidget(QWidget):
         clue_panel = QFrame()
         clue_panel.setObjectName("cluePanel")
         clue_layout = QVBoxLayout(clue_panel)
-        clue_layout.addWidget(self.word_label)
-        clue_layout.addWidget(self.clue_label)
+        clue_layout.addWidget(self.headline_label)
 
         answers = QGridLayout()
         for number in range(4):
@@ -588,10 +597,8 @@ class GameWidget(QWidget):
         self.round_label.setText(f"ROUND {self.round_number + 1} / {len(self.rounds)}")
         self.score_label.setText(f"SCORE {self.score}")
         self.streak_label.setText(f"STREAK {self.streak}")
-        self.word_label.setText(round_info['target_word'].upper())
-        self.clue_label.setText(round_info['clue'])
-        self.clue_label.setAlignment(
-            Qt.AlignRight if is_hebrew(round_info['clue']) else Qt.AlignLeft
+        self.headline_label.setText(
+            _format_headline_html(round_info['clue'], round_info['target_word'])
         )
         self.album_art_label.clear()
         self.album_art_label.setVisible(False)
@@ -1474,7 +1481,7 @@ def main():
         QLabel#brand { color: #1ed760; font-size: 24px; font-weight: 700; }
         QLabel#pageTitle { font-size: 28px; font-weight: 700; }
         QLabel#mutedText { color: #a7a7a7; }
-        QLabel#signatureWord { color: #1ed760; font-size: 34px; font-weight: 800; }
+        QLabel#questionHeadline { color: #ffffff; font-size: 30px; font-weight: 700; padding: 14px; }
         QLabel#clueText { color: #ffffff; font-size: 18px; padding: 14px; }
         QLabel#resultText { color: #1ed760; font-size: 17px; font-weight: 700; }
         QLabel#finalScore { color: #1ed760; font-size: 64px; font-weight: 800; }

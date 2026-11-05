@@ -2,7 +2,7 @@
 
 ## 1. Product overview
 
-SpotiWord is an interactive terminal trivia game based on a user's Spotify Liked Songs library. The game retrieves lyrics, identifies a signature word for a song, provides a lyric clue with the word hidden, and asks the player to select the matching song from four options.
+SpotiWord is an interactive trivia game based on a user's Spotify Liked Songs library. The game retrieves lyrics, identifies a signature word for a song, displays its complete lyric line in the question headline with that word highlighted, and asks the player to select the matching song from four options.
 
 Current release: `0.4.0`.
 
@@ -48,7 +48,7 @@ Spotify authentication is created by `create_spotify_client()` when the applicat
 2. Ignore unavailable or deleted Spotify tracks.
 3. Preserve the original track name, primary artist, Spotify URL and URI, lyric text, lyric availability flag, optional genres, and album release year.
 4. Remove common feature and remix tags before querying LRCLIB.
-5. Classify a track as Hebrew when its track name or primary artist contains Hebrew Unicode characters. Exclude Arabic-script titles, primary artists, or fetched lyrics from both the English and Hebrew pools; do not treat every non-Hebrew track as English.
+5. Classify a track as Hebrew when its track name or primary artist contains Hebrew Unicode characters. Exclude tracks with non-Latin title or artist text and lyrics confidently detected as non-English from the English pool, but preserve tracks identified as Hebrew by title or primary artist even if their fetched lyrics contain Arabic script.
 
 The loader first reads the total library size, samples random Spotify pages, deduplicates tracks, and then randomly selects up to the requested sample size. This avoids fetching every saved track solely to create a sample. Songs are represented as typed `Song` dataclasses throughout the application.
 
@@ -79,7 +79,7 @@ Signature-word rules:
 
 - Ignore stop words, numbers, and words from the track title or artist name.
 - A candidate word must contain alphabetic characters and be longer than three characters.
-- Easy mode selects the most frequent candidate word.
+- Easy mode selects the most frequent candidate word that can form a valid round; if a frequent word is too common across the pool, continue to less frequent candidates.
 - Hard mode selects randomly from the second through fifth most frequent candidates that exist.
 - A candidate must occur in no more than eight tracks in the active language pool.
 - A round is valid only when at least three decoy tracks do not contain the target word.
@@ -87,7 +87,7 @@ Signature-word rules:
 
 ## 7. Clue generation
 
-The game searches lyric lines for the first line containing the target word and displays the complete line, including the target word, as the clue. Fill in the Blank mode separately hides a lyric word as part of its gameplay.
+The game searches lyric lines for the first line containing the target word and displays the complete line, including the target word, in green in the question headline. English lines are aligned left-to-right and Hebrew lines right-to-left. No separate "Line Clue" label is displayed. Fill in the Blank mode separately hides a lyric word as part of its gameplay.
 
 If no suitable line is found, the game displays a generic hidden-word clue.
 

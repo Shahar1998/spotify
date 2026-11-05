@@ -84,8 +84,8 @@ def get_lyric_snippet_clue(lyrics_text, target_word):
     for line in lines:
         cleaned_line = line.strip()
         if pattern.search(cleaned_line):
-            return f'Line Clue: "{cleaned_line}"'
-    return f"Line Clue: Contains the word '{target_word}'"
+            return cleaned_line
+    return f"Contains the word '{target_word}'"
 
 
 def get_decoy_indices(songs, target_word):
@@ -108,6 +108,8 @@ def prepare_game_rounds(songs, difficulty_level, max_rounds=5):
                 word_to_tracks.setdefault(word, []).append(index)
 
     valid_rounds = []
+    used_words = set()
+    decoys_by_word = {}
     for index, song in enumerate(songs):
         if not song.has_real_lyrics:
             continue
@@ -121,14 +123,40 @@ def prepare_game_rounds(songs, difficulty_level, max_rounds=5):
         if not filtered_words:
             continue
 
-        top_words = Counter(filtered_words).most_common(5)
-        target_word = top_words[0][0] if difficulty_level == 'easy' or len(top_words) == 1 else random.choice(top_words[1:])[0]
-        decoy_indices = get_decoy_indices(songs, target_word)
-        if (
-            1 <= len(word_to_tracks.get(target_word, [])) <= 8
-            and len(decoy_indices) >= 3
-            and not any(item['target_word'] == target_word for item in valid_rounds)
-        ):
+        ranked_words = Counter(filtered_words).most_common()
+        eligible_words = [
+            word for word, _ in ranked_words
+            if word not in used_words
+            and 1 <= len(word_to_tracks.get(word, [])) <= 8
+        ]
+        if difficulty_level == 'hard' and len(ranked_words) > 1:
+            hard_words = {
+                word for word, _ in ranked_words[1:5]
+            }
+            preferred_words = [
+                word for word in eligible_words if word in hard_words
+            ]
+            if preferred_words:
+                eligible_words = [
+                    random.choice(preferred_words),
+                    *(
+                        word for word in eligible_words
+                        if word not in preferred_words
+                    ),
+                ]
+
+        target_word = None
+        decoy_indices = None
+        for word in eligible_words:
+            if word not in decoys_by_word:
+                decoys_by_word[word] = get_decoy_indices(songs, word)
+            if len(decoys_by_word[word]) >= 3:
+                target_word = word
+                decoy_indices = decoys_by_word[word]
+                break
+
+        if target_word is not None:
+            used_words.add(target_word)
             valid_rounds.append({
                 'target_word': target_word,
                 'correct_idx': index,

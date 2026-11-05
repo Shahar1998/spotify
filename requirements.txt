@@ -1,6 +1,7 @@
 python-dotenv
 requests
 spotipy
+langdetect
 pytest
 PySide6
 pyinstaller

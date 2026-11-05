@@ -3,10 +3,13 @@ import logging
 import os
 import random
 import re
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import dotenv
 import spotipy
+from langdetect import detect_langs
+from langdetect.lang_detect_exception import LangDetectException
 from spotipy.exceptions import SpotifyException
 from spotipy.oauth2 import SpotifyOAuth
 
@@ -21,6 +24,8 @@ dotenv.load_dotenv(ENV_PATH)
 SPOTIFY_SEARCH_PAGE_SIZE = 10
 SPOTIFY_SEARCH_MAX_OFFSET = 1000
 SPOTIFY_CATALOG_PAGE_BUDGET = 20
+MIN_LYRIC_CHARACTERS_FOR_LANGUAGE_DETECTION = 30
+NON_ENGLISH_LANGUAGE_CONFIDENCE = 0.65
 
 
 class LoadingCancelled(Exception):
@@ -81,13 +86,37 @@ def clean_track_name(name):
     return re.sub(r'\s{2,}', ' ', name).strip(' -–')
 
 
+def _has_non_latin_letters(text):
+    return any(
+        character.isalpha()
+        and 'LATIN' not in unicodedata.name(character, '')
+        for character in text
+    )
+
+
+def _has_confident_non_english_lyrics(lyrics):
+    letter_count = sum(character.isalpha() for character in lyrics)
+    if letter_count < MIN_LYRIC_CHARACTERS_FOR_LANGUAGE_DETECTION:
+        return False
+    try:
+        detections = detect_langs(lyrics)
+    except LangDetectException:
+        return False
+    return bool(
+        detections
+        and detections[0].lang != 'en'
+        and detections[0].prob >= NON_ENGLISH_LANGUAGE_CONFIDENCE
+    )
+
+
 def _build_song_entry(item, lyrics_cache=None):
     track = _extract_track(item)
     if not track or not track.get('artists'):
         return None
     original_name = track.get('name', '')
     artist_name = track['artists'][0].get('name', '')
-    if is_arabic(f'{original_name} {artist_name}'):
+    is_hebrew_track = is_hebrew(f'{original_name} {artist_name}')
+    if _has_non_latin_letters(f'{original_name} {artist_name}') and not is_hebrew_track:
         return None
     album_images = track.get('album', {}).get('images', [])
     release_date = track.get('album', {}).get('release_date', '')
@@ -96,7 +125,14 @@ def _build_song_entry(item, lyrics_cache=None):
     except (TypeError, ValueError):
         release_year = None
     lyrics = fetch_lrclib_lyrics(clean_track_name(original_name), artist_name, cache=lyrics_cache)
-    if lyrics and is_arabic(lyrics):
+    if (
+        lyrics
+        and not is_hebrew_track
+        and (
+            _has_non_latin_letters(lyrics)
+            or _has_confident_non_english_lyrics(lyrics)
+        )
+    ):
         return None
     has_real_lyrics = bool(lyrics)
     return Song(
@@ -109,7 +145,7 @@ def _build_song_entry(item, lyrics_cache=None):
         spotify_uri=track.get('uri'),
         genres=tuple(track.get('_spotiword_genres', ())),
         release_year=release_year,
-    ), is_hebrew(original_name) or is_hebrew(artist_name)
+    ), is_hebrew_track
 
 
 def enrich_track_metadata(spotify_client, items):
